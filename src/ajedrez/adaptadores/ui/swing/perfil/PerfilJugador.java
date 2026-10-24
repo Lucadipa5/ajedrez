@@ -1,6 +1,17 @@
 package ajedrez.adaptadores.ui.swing.perfil;
 
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.security.spec.InvalidKeySpecException;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Modelo de datos del perfil de un jugador.
@@ -25,7 +36,15 @@ public class PerfilJugador implements Serializable {
     private static final double FACTOR_NIVEL = 1.6;
     private static final int NIVEL_MAXIMO = 50;
 
+    // --- Hash de contraseña (PBKDF2) ---
+    private static final int ITERACIONES_HASH = 65536;
+    private static final int LARGO_HASH_BITS = 256;
+    private static final int LARGO_SAL_BYTES = 16;
+
     private String nombre;
+    // La contraseña nunca se guarda en texto plano: solo la sal y el hash derivado
+    private byte[] salContrasena;
+    private byte[] hashContrasena;
     private long puntosAcumulados;
     private int nivel;
     private int puntosEnNivelActual;   // puntos acumulados dentro del nivel actual
@@ -47,6 +66,54 @@ public class PerfilJugador implements Serializable {
         this.partidasGanadas = 0;
         this.piezasComidas = 0;
         this.jaquesDados = 0;
+    }
+
+    /**
+     * Copia profunda del perfil (vía serialización). Se usa para guardar el estado
+     * antes de cada jugada y poder restaurarlo al deshacer.
+     */
+    public PerfilJugador copiar() {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (ObjectOutputStream oos = new ObjectOutputStream(bytes)) {
+                oos.writeObject(this);
+            }
+            try (ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+                return (PerfilJugador) ois.readObject();
+            }
+        } catch (IOException | ClassNotFoundException e) {
+            throw new IllegalStateException("No se pudo copiar el perfil", e);
+        }
+    }
+
+    // --- Contraseña ---
+    public boolean tieneContrasena() {
+        return hashContrasena != null && salContrasena != null;
+    }
+
+    public void establecerContrasena(char[] contrasena) {
+        byte[] sal = new byte[LARGO_SAL_BYTES];
+        new SecureRandom().nextBytes(sal);
+        this.salContrasena = sal;
+        this.hashContrasena = derivarHash(contrasena, sal);
+    }
+
+    public boolean verificarContrasena(char[] contrasena) {
+        if (!tieneContrasena()) return false;
+        byte[] intento = derivarHash(contrasena, salContrasena);
+        // Comparación en tiempo constante
+        return MessageDigest.isEqual(intento, hashContrasena);
+    }
+
+    private static byte[] derivarHash(char[] contrasena, byte[] sal) {
+        PBEKeySpec spec = new PBEKeySpec(contrasena, sal, ITERACIONES_HASH, LARGO_HASH_BITS);
+        try {
+            return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+            throw new IllegalStateException("No se pudo calcular el hash de la contraseña", e);
+        } finally {
+            spec.clearPassword();
+        }
     }
 
     // --- Cálculo exponencial del umbral de cada nivel ---

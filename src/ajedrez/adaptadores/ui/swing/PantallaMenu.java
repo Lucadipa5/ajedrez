@@ -9,11 +9,11 @@ import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
-import java.util.List;
+import java.util.Arrays;
 
 /**
  * Pantalla de menú principal.
- * Permite crear/seleccionar perfil de jugador y elegir el color con el que se juega
+ * Permite iniciar sesión o registrarse (usuario + contraseña) y elegir el color con el que se juega
  * antes de iniciar la partida.
  */
 public class PantallaMenu extends JFrame {
@@ -29,10 +29,45 @@ public class PantallaMenu extends JFrame {
     private static final java.awt.Color BTN_HOVER_BL  = new java.awt.Color(255, 245, 215);
     private static final java.awt.Color BTN_HOVER_NG  = new java.awt.Color(70, 65, 60);
 
+    /**
+     * Busca una fuente que pueda renderizar símbolos Unicode de ajedrez (♔♕♖♗♘♙).
+     * Prueba varias fuentes conocidas y selecciona la primera disponible.
+     */
+    static String obtenerFuenteAjedrez() {
+        String[] candidatas = {
+            "Segoe UI Symbol", "Arial Unicode MS", "DejaVu Sans",
+            "Noto Sans Symbols2", "Noto Sans Symbols", "Symbola",
+            "Segoe UI Emoji", "Apple Symbols", "Lucida Sans Unicode"
+        };
+        char testChar = '\u2654'; // ♔ rey blanco
+        for (String nombre : candidatas) {
+            Font f = new Font(nombre, Font.PLAIN, 12);
+            if (f.canDisplay(testChar)) {
+                return nombre;
+            }
+        }
+        // Fallback: recorrer todas las fuentes del sistema
+        for (String nombre : GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames()) {
+            Font f = new Font(nombre, Font.PLAIN, 12);
+            if (f.canDisplay(testChar)) {
+                return nombre;
+            }
+        }
+        return "Segoe UI Symbol"; // último recurso
+    }
+
+    static final String FUENTE_AJEDREZ = obtenerFuenteAjedrez();
+
     private PerfilJugador perfilSeleccionado = null;
     private JLabel lblPerfilActual;
     private JLabel lblNivelActual;
     private JProgressBar barraExp;
+    private JButton btnIniciarSesion;
+    private JButton btnRegistrarse;
+    private JButton btnCerrarSesion;
+
+    private static final int LARGO_MAX_USUARIO = 20;
+    private static final int LARGO_MIN_CONTRASENA = 4;
 
     public PantallaMenu() {
         setTitle("Ajedrez — Menú Principal");
@@ -73,7 +108,7 @@ public class PantallaMenu extends JFrame {
 
         // Pieza decorativa grande
         JLabel icono = new JLabel("♔", SwingConstants.CENTER);
-        icono.setFont(new Font("Segoe UI Symbol", Font.PLAIN, 90));
+        icono.setFont(new Font(FUENTE_AJEDREZ, Font.PLAIN, 90));
         icono.setForeground(COLOR_DORADO);
         icono.setAlignmentX(Component.CENTER_ALIGNMENT);
 
@@ -128,23 +163,19 @@ public class PantallaMenu extends JFrame {
         card.setAlignmentX(Component.CENTER_ALIGNMENT);
         card.setMaximumSize(new Dimension(440, 200));
 
-        // Fila: ícono perfil + info + botón cambiar
+        // Fila: info + botones de cuenta
         JPanel filaInfo = new JPanel(new BorderLayout(10, 0));
         filaInfo.setBackground(BG_CARD);
-
-        JLabel iconoPerfil = new JLabel("👤");
-        iconoPerfil.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 36));
-        iconoPerfil.setForeground(COLOR_DORADO);
 
         JPanel infoTexto = new JPanel();
         infoTexto.setLayout(new BoxLayout(infoTexto, BoxLayout.Y_AXIS));
         infoTexto.setBackground(BG_CARD);
 
-        lblPerfilActual = new JLabel("Sin perfil seleccionado");
+        lblPerfilActual = new JLabel("Sin sesión iniciada");
         lblPerfilActual.setFont(new Font("Segoe UI", Font.BOLD, 15));
         lblPerfilActual.setForeground(COLOR_TEXTO);
 
-        lblNivelActual = new JLabel("Seleccioná o creá un perfil para continuar");
+        lblNivelActual = new JLabel("Iniciá sesión o registrate para guardar tu progreso");
         lblNivelActual.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         lblNivelActual.setForeground(COLOR_SUBTXT);
 
@@ -152,19 +183,30 @@ public class PantallaMenu extends JFrame {
         infoTexto.add(Box.createVerticalStrut(3));
         infoTexto.add(lblNivelActual);
 
-        JPanel botonesGestion = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        JPanel botonesGestion = new JPanel();
+        botonesGestion.setLayout(new BoxLayout(botonesGestion, BoxLayout.Y_AXIS));
         botonesGestion.setBackground(BG_CARD);
 
-        JButton btnNuevoPerfil = crearBotonSecundario("＋ Nuevo");
-        btnNuevoPerfil.addActionListener(e -> onCrearPerfil());
+        btnIniciarSesion = crearBotonSecundario("Iniciar sesión");
+        btnIniciarSesion.addActionListener(e -> onIniciarSesion());
 
-        JButton btnCargarPerfil = crearBotonSecundario("📂 Cargar");
-        btnCargarPerfil.addActionListener(e -> onCargarPerfil());
+        btnRegistrarse = crearBotonSecundario("Registrarse");
+        btnRegistrarse.addActionListener(e -> onRegistrarse());
 
-        botonesGestion.add(btnNuevoPerfil);
-        botonesGestion.add(btnCargarPerfil);
+        btnCerrarSesion = crearBotonSecundario("Cerrar sesión");
+        btnCerrarSesion.addActionListener(e -> onCerrarSesion());
+        btnCerrarSesion.setVisible(false);
 
-        filaInfo.add(iconoPerfil, BorderLayout.WEST);
+        for (JButton b : new JButton[]{btnIniciarSesion, btnRegistrarse, btnCerrarSesion}) {
+            b.setAlignmentX(Component.RIGHT_ALIGNMENT);
+            b.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getPreferredSize().height));
+        }
+
+        botonesGestion.add(btnIniciarSesion);
+        botonesGestion.add(Box.createVerticalStrut(5));
+        botonesGestion.add(btnRegistrarse);
+        botonesGestion.add(btnCerrarSesion);
+
         filaInfo.add(infoTexto, BorderLayout.CENTER);
         filaInfo.add(botonesGestion, BorderLayout.EAST);
 
@@ -250,7 +292,7 @@ public class PantallaMenu extends JFrame {
         JPanel panel = new JPanel();
         panel.setBackground(BG_DARK);
         panel.setBorder(new EmptyBorder(10, 0, 15, 0));
-        JLabel lbl = new JLabel("Ezequiel Vales — Ingeniería de Software");
+        JLabel lbl = new JLabel("Proyecto Ajedrez - Ingeniería de Software 2026");
         lbl.setFont(new Font("Segoe UI", Font.ITALIC, 11));
         lbl.setForeground(COLOR_SUBTXT);
         panel.add(lbl);
@@ -260,46 +302,183 @@ public class PantallaMenu extends JFrame {
     // -----------------------------------------------------------------------
     // Lógica de eventos
     // -----------------------------------------------------------------------
-    private void onCrearPerfil() {
-        String nombre = JOptionPane.showInputDialog(this,
-                "Ingresá tu nombre de usuario:",
-                "Crear Perfil", JOptionPane.PLAIN_MESSAGE);
-        if (nombre != null && !nombre.trim().isEmpty()) {
-            perfilSeleccionado = GestorPerfiles.crearPerfil(nombre.trim());
-            actualizarTarjetaPerfil();
+    private void onIniciarSesion() {
+        JTextField campoUsuario = new JTextField(18);
+        JPasswordField campoContrasena = new JPasswordField(18);
+        JPanel form = crearFormulario(
+                new String[]{"Usuario:", "Contraseña:"},
+                new JComponent[]{campoUsuario, campoContrasena});
+
+        while (true) {
+            if (!mostrarFormulario(form, "Iniciar sesión", campoUsuario)) return;
+
+            String usuario = campoUsuario.getText().trim();
+            char[] contrasena = campoContrasena.getPassword();
+            try {
+                if (usuario.isEmpty() || contrasena.length == 0) {
+                    mostrarError("Completá usuario y contraseña.");
+                    continue;
+                }
+
+                // Cuentas creadas antes del sistema de contraseñas: se les pide crear una
+                if (GestorPerfiles.esCuentaSinContrasena(usuario)) {
+                    PerfilJugador perfil = asignarContrasenaCuentaAntigua(usuario);
+                    if (perfil != null) {
+                        perfilSeleccionado = perfil;
+                        actualizarTarjetaPerfil();
+                    }
+                    return;
+                }
+
+                PerfilJugador perfil = GestorPerfiles.iniciarSesion(usuario, contrasena);
+                if (perfil == null) {
+                    mostrarError("Usuario o contraseña incorrectos.");
+                    campoContrasena.setText("");
+                    continue;
+                }
+                perfilSeleccionado = perfil;
+                actualizarTarjetaPerfil();
+                return;
+            } finally {
+                Arrays.fill(contrasena, '\0');
+            }
         }
     }
 
-    private void onCargarPerfil() {
-        List<PerfilJugador> perfiles = GestorPerfiles.cargarPerfiles();
-        if (perfiles.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "No hay perfiles guardados.\nCreá uno primero.",
-                    "Sin perfiles", JOptionPane.INFORMATION_MESSAGE);
-            return;
+    private PerfilJugador asignarContrasenaCuentaAntigua(String usuario) {
+        JOptionPane.showMessageDialog(this,
+                "La cuenta \"" + usuario + "\" se creó antes de que existieran las contraseñas.\n"
+                        + "Elegí una contraseña para protegerla.",
+                "Proteger cuenta", JOptionPane.INFORMATION_MESSAGE);
+
+        JPasswordField campoNueva = new JPasswordField(18);
+        JPasswordField campoConfirmar = new JPasswordField(18);
+        JPanel form = crearFormulario(
+                new String[]{"Nueva contraseña:", "Repetir contraseña:"},
+                new JComponent[]{campoNueva, campoConfirmar});
+
+        while (true) {
+            if (!mostrarFormulario(form, "Proteger cuenta", campoNueva)) return null;
+
+            char[] nueva = campoNueva.getPassword();
+            char[] confirmar = campoConfirmar.getPassword();
+            try {
+                String error = validarContrasena(nueva, confirmar);
+                if (error != null) {
+                    mostrarError(error);
+                    continue;
+                }
+                return GestorPerfiles.asignarContrasenaACuentaAntigua(usuario, nueva);
+            } finally {
+                Arrays.fill(nueva, '\0');
+                Arrays.fill(confirmar, '\0');
+            }
         }
+    }
 
-        String[] nombres = perfiles.stream()
-                .map(p -> p.getNombre() + " [Nv." + p.getNivel() + " | " + p.getPuntosAcumulados() + " pts]")
-                .toArray(String[]::new);
+    private void onRegistrarse() {
+        JTextField campoUsuario = new JTextField(18);
+        JPasswordField campoContrasena = new JPasswordField(18);
+        JPasswordField campoConfirmar = new JPasswordField(18);
+        JPanel form = crearFormulario(
+                new String[]{"Usuario:", "Contraseña:", "Repetir contraseña:"},
+                new JComponent[]{campoUsuario, campoContrasena, campoConfirmar});
 
-        String seleccion = (String) JOptionPane.showInputDialog(this,
-                "Seleccioná tu perfil:",
-                "Cargar Perfil",
-                JOptionPane.PLAIN_MESSAGE,
-                null,
-                nombres,
-                nombres[0]);
+        while (true) {
+            if (!mostrarFormulario(form, "Registrarse", campoUsuario)) return;
 
-        if (seleccion != null) {
-            int idx = java.util.Arrays.asList(nombres).indexOf(seleccion);
-            perfilSeleccionado = perfiles.get(idx);
-            actualizarTarjetaPerfil();
+            String usuario = campoUsuario.getText().trim();
+            char[] contrasena = campoContrasena.getPassword();
+            char[] confirmar = campoConfirmar.getPassword();
+            try {
+                if (usuario.isEmpty()) {
+                    mostrarError("Ingresá un nombre de usuario.");
+                    continue;
+                }
+                if (usuario.length() > LARGO_MAX_USUARIO) {
+                    mostrarError("El usuario puede tener como máximo " + LARGO_MAX_USUARIO + " caracteres.");
+                    continue;
+                }
+                String error = validarContrasena(contrasena, confirmar);
+                if (error != null) {
+                    mostrarError(error);
+                    continue;
+                }
+
+                PerfilJugador nuevo = GestorPerfiles.registrar(usuario, contrasena);
+                if (nuevo == null) {
+                    mostrarError("El usuario \"" + usuario + "\" ya existe. Elegí otro nombre.");
+                    continue;
+                }
+                perfilSeleccionado = nuevo;
+                actualizarTarjetaPerfil();
+                JOptionPane.showMessageDialog(this,
+                        "Cuenta creada. ¡Bienvenido/a, " + usuario + "!",
+                        "Registro exitoso", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            } finally {
+                Arrays.fill(contrasena, '\0');
+                Arrays.fill(confirmar, '\0');
+            }
         }
+    }
+
+    private void onCerrarSesion() {
+        perfilSeleccionado = null;
+        actualizarTarjetaPerfil();
+    }
+
+    /** Devuelve un mensaje de error si la contraseña no es válida, o null si está bien. */
+    private String validarContrasena(char[] contrasena, char[] confirmacion) {
+        if (contrasena.length < LARGO_MIN_CONTRASENA) {
+            return "La contraseña debe tener al menos " + LARGO_MIN_CONTRASENA + " caracteres.";
+        }
+        if (!Arrays.equals(contrasena, confirmacion)) {
+            return "Las contraseñas no coinciden.";
+        }
+        return null;
+    }
+
+    private JPanel crearFormulario(String[] etiquetas, JComponent[] campos) {
+        JPanel form = new JPanel(new GridBagLayout());
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(4, 4, 4, 4);
+        c.anchor = GridBagConstraints.WEST;
+        for (int i = 0; i < etiquetas.length; i++) {
+            c.gridy = i;
+            c.gridx = 0;
+            form.add(new JLabel(etiquetas[i]), c);
+            c.gridx = 1;
+            form.add(campos[i], c);
+        }
+        return form;
+    }
+
+    /** Muestra el formulario; devuelve true si el usuario aceptó. */
+    private boolean mostrarFormulario(JPanel form, String titulo, JComponent foco) {
+        SwingUtilities.invokeLater(foco::requestFocusInWindow);
+        int resp = JOptionPane.showConfirmDialog(this, form, titulo,
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        return resp == JOptionPane.OK_OPTION;
+    }
+
+    private void mostrarError(String mensaje) {
+        JOptionPane.showMessageDialog(this, mensaje, "Error", JOptionPane.ERROR_MESSAGE);
     }
 
     private void actualizarTarjetaPerfil() {
-        if (perfilSeleccionado == null) return;
+        boolean logueado = perfilSeleccionado != null;
+        btnIniciarSesion.setVisible(!logueado);
+        btnRegistrarse.setVisible(!logueado);
+        btnCerrarSesion.setVisible(logueado);
+
+        if (!logueado) {
+            lblPerfilActual.setText("Sin sesión iniciada");
+            lblNivelActual.setText("Iniciá sesión o registrate para guardar tu progreso");
+            barraExp.setValue(0);
+            barraExp.setString("0 / 0 XP");
+            return;
+        }
         lblPerfilActual.setText(perfilSeleccionado.getNombre());
         lblNivelActual.setText("Nivel " + perfilSeleccionado.getNivel()
                 + "  •  " + perfilSeleccionado.getPuntosAcumulados() + " pts totales"
@@ -314,8 +493,8 @@ public class PantallaMenu extends JFrame {
     private void iniciarPartida(Color colorJugador) {
         if (perfilSeleccionado == null) {
             int resp = JOptionPane.showConfirmDialog(this,
-                    "No hay ningún perfil seleccionado.\n¿Querés jugar sin perfil (sin guardar progreso)?",
-                    "Sin perfil", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                    "No iniciaste sesión.\n¿Querés jugar como invitado (sin guardar progreso)?",
+                    "Sin sesión", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             if (resp != JOptionPane.YES_OPTION) return;
         }
 
@@ -327,7 +506,8 @@ public class PantallaMenu extends JFrame {
     // -----------------------------------------------------------------------
     // Actualizar la tarjeta de perfil desde la ventana de juego al terminar
     // -----------------------------------------------------------------------
-    public void onPartidaTerminada() {
+    public void onPartidaTerminada(PerfilJugador perfilActualizado) {
+        perfilSeleccionado = perfilActualizado;
         actualizarTarjetaPerfil();
         this.setVisible(true);
     }
@@ -347,7 +527,7 @@ public class PantallaMenu extends JFrame {
                 g2.fillRoundRect(0, 0, getWidth(), getHeight(), 12, 12);
 
                 // Símbolo
-                g2.setFont(new Font("Segoe UI Symbol", Font.PLAIN, 36));
+                g2.setFont(new Font(FUENTE_AJEDREZ, Font.PLAIN, 36));
                 g2.setColor(fgColor);
                 FontMetrics fm = g2.getFontMetrics();
                 int sx = (getWidth() - fm.stringWidth(simbolo)) / 2;
@@ -423,7 +603,7 @@ public class PantallaMenu extends JFrame {
         g2.drawOval(2, 2, size - 4, size - 4);
 
         // Símbolo del rey
-        g2.setFont(new Font("Segoe UI Symbol", Font.PLAIN, 42));
+        g2.setFont(new Font(FUENTE_AJEDREZ, Font.PLAIN, 42));
         g2.setColor(COLOR_DORADO);
         FontMetrics fm = g2.getFontMetrics();
         String sym = "♔";

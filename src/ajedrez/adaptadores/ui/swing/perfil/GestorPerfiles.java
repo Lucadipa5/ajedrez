@@ -43,14 +43,79 @@ public class GestorPerfiles {
     }
 
     /**
-     * Agrega un nuevo perfil y lo persiste en disco.
+     * Busca un perfil por nombre de usuario (sin distinguir mayúsculas). Devuelve null si no existe.
      */
-    public static PerfilJugador crearPerfil(String nombre) {
+    private static PerfilJugador buscarPorNombre(List<PerfilJugador> perfiles, String nombre) {
+        for (PerfilJugador p : perfiles) {
+            if (p.getNombre().equalsIgnoreCase(nombre)) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Vuelve a leer desde disco el perfil guardado, descartando cambios en memoria.
+     */
+    public static PerfilJugador recargarPerfil(PerfilJugador perfil) {
+        PerfilJugador guardado = buscarPorNombre(cargarPerfiles(), perfil.getNombre());
+        return guardado != null ? guardado : perfil;
+    }
+
+    public static boolean existeUsuario(String nombre) {
+        return buscarPorNombre(cargarPerfiles(), nombre) != null;
+    }
+
+    /**
+     * Registra una cuenta nueva con usuario y contraseña y la persiste en disco.
+     * @return el perfil creado, o null si el nombre de usuario ya está en uso
+     */
+    public static PerfilJugador registrar(String nombre, char[] contrasena) {
         List<PerfilJugador> perfiles = cargarPerfiles();
+        if (buscarPorNombre(perfiles, nombre) != null) {
+            return null;
+        }
         PerfilJugador nuevo = new PerfilJugador(nombre);
+        nuevo.establecerContrasena(contrasena);
         perfiles.add(nuevo);
         guardarPerfiles(perfiles);
         return nuevo;
+    }
+
+    /**
+     * Inicia sesión verificando la contraseña.
+     * @return el perfil si las credenciales son correctas, o null si no lo son
+     */
+    public static PerfilJugador iniciarSesion(String nombre, char[] contrasena) {
+        PerfilJugador perfil = buscarPorNombre(cargarPerfiles(), nombre);
+        if (perfil == null || !perfil.verificarContrasena(contrasena)) {
+            return null;
+        }
+        return perfil;
+    }
+
+    /**
+     * Indica si el usuario existe pero es una cuenta antigua creada antes del sistema
+     * de contraseñas (todavía no tiene contraseña asignada).
+     */
+    public static boolean esCuentaSinContrasena(String nombre) {
+        PerfilJugador perfil = buscarPorNombre(cargarPerfiles(), nombre);
+        return perfil != null && !perfil.tieneContrasena();
+    }
+
+    /**
+     * Asigna contraseña a una cuenta antigua que no tenía. No hace nada si ya tenía una.
+     * @return el perfil actualizado, o null si no existe o ya tenía contraseña
+     */
+    public static PerfilJugador asignarContrasenaACuentaAntigua(String nombre, char[] contrasena) {
+        List<PerfilJugador> perfiles = cargarPerfiles();
+        PerfilJugador perfil = buscarPorNombre(perfiles, nombre);
+        if (perfil == null || perfil.tieneContrasena()) {
+            return null;
+        }
+        perfil.establecerContrasena(contrasena);
+        guardarPerfiles(perfiles);
+        return perfil;
     }
 
     /**

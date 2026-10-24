@@ -31,6 +31,12 @@ if %RESULT% neq 0 (
     exit /b %RESULT%
 )
 
+echo Copiando recursos...
+if exist "src\ajedrez\adaptadores\ui\swing\recursos" (
+    if not exist "bin\ajedrez\adaptadores\ui\swing\recursos" mkdir "bin\ajedrez\adaptadores\ui\swing\recursos"
+    xcopy /Y /Q "src\ajedrez\adaptadores\ui\swing\recursos\*.*" "bin\ajedrez\adaptadores\ui\swing\recursos\" >nul 2>nul
+)
+
 echo Compilacion exitosa. Iniciando juego...
 java -cp bin ajedrez.adaptadores.ui.swing.Main
 pause
