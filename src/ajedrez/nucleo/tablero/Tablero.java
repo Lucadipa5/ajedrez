@@ -23,10 +23,6 @@ public class Tablero {
         this.casillasOcupadas = new HashMap<>();
     }
 
-    private Tablero(Map<Posicion, Pieza> casillasOcupadas) {
-        this.casillasOcupadas = new HashMap<>(casillasOcupadas);
-    }
-
     public boolean esCasillaValida(Posicion pos) {
         return pos != null && pos.esValida();
     }
@@ -83,11 +79,24 @@ public class Tablero {
     }
 
     /**
-     * Retorna una copia superficial de las posiciones y referencias del tablero.
-     * Esencial para verificar si un movimiento propio deja al rey en jaque sin alterar la partida real.
+     * Retorna una copia PROFUNDA del tablero: cada Pieza es una nueva instancia independiente.
+     * Esto es esencial para las simulaciones de jaque/jaque-mate: si el clon modifica
+     * el flag seHaMovido de una pieza durante la simulación, NO debe afectar al tablero real.
+     * Un clon superficial (shallow) compartía las referencias a Pieza y causaba bugs donde
+     * los movimientos legales del rival se calculaban incorrectamente, impidiendo la
+     * detección del jaque mate.
      */
     public Tablero clonar() {
-        return new Tablero(this.casillasOcupadas);
+        Tablero clon = new Tablero();
+        for (Map.Entry<Posicion, Pieza> entrada : this.casillasOcupadas.entrySet()) {
+            Pieza original = entrada.getValue();
+            // Crear nueva instancia de Pieza con el mismo tipo, color, estrategia y seHaMovido
+            Pieza copia = new Pieza(original.getTipo(), original.getColor(),
+                    original.getEstrategiaMovimiento());
+            copia.setSeHaMovido(original.seHaMovido());
+            clon.casillasOcupadas.put(entrada.getKey(), copia);
+        }
+        return clon;
     }
 
     @Override

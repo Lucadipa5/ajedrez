@@ -6,6 +6,7 @@ import ajedrez.nucleo.dominio.Color;
 import ajedrez.nucleo.dominio.Pieza;
 import ajedrez.nucleo.dominio.Posicion;
 import ajedrez.nucleo.dominio.TipoPieza;
+import ajedrez.nucleo.estados.EstadoAhogado;
 import ajedrez.nucleo.estados.EstadoJaqueMate;
 import ajedrez.nucleo.estados.EstadoPartida;
 import ajedrez.nucleo.estados.EstadoTurnoBlanco;
@@ -99,13 +100,19 @@ public class PartidaAjedrez {
         MoverPiezaComando comando = new MoverPiezaComando(tablero, origen, destino, eleccionPromocion, fabricaPiezas);
         historialComandos.ejecutarComando(comando);
 
-        // 2. Evaluar el estado del rival (Jaque / Jaque Mate) y transicionar de Estado
+        // 2. Evaluar el estado del rival (Jaque / Jaque Mate / Ahogado) y transicionar de Estado
         Color rival = turnoActual.opuesto();
         boolean rivalEnJaque = detectorJaque.estaEnJaque(tablero, rival);
         boolean rivalTieneJugadas = validadorMovimiento.tieneMovimientosLegales(tablero, rival);
 
-        if (rivalEnJaque && !rivalTieneJugadas) {
-            estadoActual = new EstadoJaqueMate(turnoActual);
+        if (!rivalTieneJugadas) {
+            if (rivalEnJaque) {
+                // Jaque Mate: el rival está en jaque y no puede escapar
+                estadoActual = new EstadoJaqueMate(turnoActual);
+            } else {
+                // Ahogado (Stalemate): el rival NO está en jaque pero no tiene movimientos legales
+                estadoActual = new EstadoAhogado(rival);
+            }
         } else {
             estadoActual = estadoActual.siguienteTurno();
         }
