@@ -26,13 +26,15 @@ class CapaAnimacionXP extends JComponent {
         final Point centro;
         final long inicio;
         final float tamano;
+        final java.awt.Color color;
 
-        TextoFlotante(String texto, String detalle, Point centro, long inicio, float tamano) {
+        TextoFlotante(String texto, String detalle, Point centro, long inicio, float tamano, java.awt.Color color) {
             this.texto = texto;
             this.detalle = detalle;
             this.centro = centro;
             this.inicio = inicio;
             this.tamano = tamano;
+            this.color = color;
         }
     }
 
@@ -49,7 +51,11 @@ class CapaAnimacionXP extends JComponent {
      * @param retrasoMs espera antes de empezar, para encadenar varias animaciones
      */
     void mostrar(String texto, String detalle, Point centro, int retrasoMs, float tamano) {
-        textos.add(new TextoFlotante(texto, detalle, centro, System.currentTimeMillis() + retrasoMs, tamano));
+        mostrar(texto, detalle, centro, retrasoMs, tamano, COLOR_DORADO);
+    }
+
+    void mostrar(String texto, String detalle, Point centro, int retrasoMs, float tamano, java.awt.Color color) {
+        textos.add(new TextoFlotante(texto, detalle, centro, System.currentTimeMillis() + retrasoMs, tamano, color));
         setVisible(true);
         if (!timer.isRunning()) timer.start();
     }
@@ -91,7 +97,7 @@ class CapaAnimacionXP extends JComponent {
 
             float tamPrincipal = Math.max(6f, t.tamano * escala);
             dibujarTextoConBorde(g2, t.texto, new Font("Segoe UI", Font.BOLD, 1).deriveFont(tamPrincipal),
-                    t.centro.x, y, COLOR_DORADO);
+                    t.centro.x, y, t.color);
             if (t.detalle != null) {
                 float tamDetalle = Math.max(6f, t.tamano * 0.5f * escala);
                 dibujarTextoConBorde(g2, t.detalle, new Font("Segoe UI", Font.BOLD, 1).deriveFont(tamDetalle),

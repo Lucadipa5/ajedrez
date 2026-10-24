@@ -1,8 +1,13 @@
 package ajedrez.adaptadores.ui.swing;
 
-import ajedrez.adaptadores.ui.swing.perfil.GestorPerfiles;
-import ajedrez.adaptadores.ui.swing.perfil.PerfilJugador;
+import ajedrez.adaptadores.ia.MotorPython;
 import ajedrez.nucleo.dominio.Color;
+import ajedrez.nucleo.ia.Dificultad;
+import ajedrez.nucleo.ia.MotorAjedrez;
+import ajedrez.nucleo.perfil.PerfilJugador;
+import ajedrez.nucleo.perfil.ServicioCuentas;
+import ajedrez.nucleo.servicio.PartidaAjedrez;
+import ajedrez.nucleo.servicio.SesionDePartida;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -69,10 +74,18 @@ public class PantallaMenu extends JFrame {
     private static final int LARGO_MAX_USUARIO = 20;
     private static final int LARGO_MIN_CONTRASENA = 4;
 
-    public PantallaMenu() {
+    private final ServicioCuentas cuentas;
+    private boolean contraIA = false;
+    private JButton btnModoDosJugadores;
+    private JButton btnModoIA;
+    private JComboBox<Dificultad> comboDificultad;
+    private JPanel filaDificultad;
+
+    public PantallaMenu(ServicioCuentas cuentas) {
+        this.cuentas = cuentas;
         setTitle("Ajedrez — Menú Principal");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(520, 680);
+        setSize(520, 780);
         setLocationRelativeTo(null);
         setResizable(false);
 
@@ -144,9 +157,63 @@ public class PantallaMenu extends JFrame {
         panel.add(Box.createVerticalStrut(25));
         panel.add(construirSeparador("NUEVA PARTIDA"));
         panel.add(Box.createVerticalStrut(15));
+        panel.add(construirSelectorModo());
+        panel.add(Box.createVerticalStrut(15));
         panel.add(construirBotonesColor());
 
         return panel;
+    }
+
+    // -----------------------------------------------------------------------
+    // Selector de modo: 2 jugadores / contra la IA (+ dificultad)
+    // -----------------------------------------------------------------------
+    private JPanel construirSelectorModo() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(BG_DARK);
+        panel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(440, 80));
+
+        JPanel filaModos = new JPanel(new GridLayout(1, 2, 10, 0));
+        filaModos.setBackground(BG_DARK);
+        filaModos.setMaximumSize(new Dimension(440, 34));
+
+        btnModoDosJugadores = crearBotonSecundario("2 jugadores");
+        btnModoDosJugadores.addActionListener(e -> elegirModo(false));
+        btnModoIA = crearBotonSecundario("Contra la IA");
+        btnModoIA.addActionListener(e -> elegirModo(true));
+        filaModos.add(btnModoDosJugadores);
+        filaModos.add(btnModoIA);
+
+        filaDificultad = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 0));
+        filaDificultad.setBackground(BG_DARK);
+        JLabel lblDificultad = new JLabel("Dificultad:");
+        lblDificultad.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        lblDificultad.setForeground(COLOR_SUBTXT);
+        comboDificultad = new JComboBox<>(Dificultad.values());
+        comboDificultad.setSelectedItem(Dificultad.MEDIA);
+        comboDificultad.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        filaDificultad.add(lblDificultad);
+        filaDificultad.add(comboDificultad);
+
+        panel.add(filaModos);
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(filaDificultad);
+
+        elegirModo(false);
+        return panel;
+    }
+
+    private void elegirModo(boolean ia) {
+        contraIA = ia;
+        estilizarModo(btnModoDosJugadores, !ia);
+        estilizarModo(btnModoIA, ia);
+        filaDificultad.setVisible(ia);
+    }
+
+    private void estilizarModo(JButton btn, boolean activo) {
+        btn.setBackground(activo ? COLOR_DORADO : new java.awt.Color(60, 58, 55));
+        btn.setForeground(activo ? BG_DARK : COLOR_DORADO);
     }
 
     // -----------------------------------------------------------------------
@@ -321,7 +388,7 @@ public class PantallaMenu extends JFrame {
                 }
 
                 // Cuentas creadas antes del sistema de contraseñas: se les pide crear una
-                if (GestorPerfiles.esCuentaSinContrasena(usuario)) {
+                if (cuentas.esCuentaSinContrasena(usuario)) {
                     PerfilJugador perfil = asignarContrasenaCuentaAntigua(usuario);
                     if (perfil != null) {
                         perfilSeleccionado = perfil;
@@ -330,7 +397,7 @@ public class PantallaMenu extends JFrame {
                     return;
                 }
 
-                PerfilJugador perfil = GestorPerfiles.iniciarSesion(usuario, contrasena);
+                PerfilJugador perfil = cuentas.iniciarSesion(usuario, contrasena);
                 if (perfil == null) {
                     mostrarError("Usuario o contraseña incorrectos.");
                     campoContrasena.setText("");
@@ -368,7 +435,7 @@ public class PantallaMenu extends JFrame {
                     mostrarError(error);
                     continue;
                 }
-                return GestorPerfiles.asignarContrasenaACuentaAntigua(usuario, nueva);
+                return cuentas.asignarContrasenaACuentaAntigua(usuario, nueva);
             } finally {
                 Arrays.fill(nueva, '\0');
                 Arrays.fill(confirmar, '\0');
@@ -405,7 +472,7 @@ public class PantallaMenu extends JFrame {
                     continue;
                 }
 
-                PerfilJugador nuevo = GestorPerfiles.registrar(usuario, contrasena);
+                PerfilJugador nuevo = cuentas.registrar(usuario, contrasena);
                 if (nuevo == null) {
                     mostrarError("El usuario \"" + usuario + "\" ya existe. Elegí otro nombre.");
                     continue;
@@ -498,7 +565,49 @@ public class PantallaMenu extends JFrame {
             if (resp != JOptionPane.YES_OPTION) return;
         }
 
-        VentanaAjedrez ventana = new VentanaAjedrez(perfilSeleccionado, colorJugador, this);
+        if (!contraIA) {
+            abrirPartida(colorJugador, null, null);
+            return;
+        }
+
+        // El motor de IA tarda un momento en arrancar (lanza Python): se inicia en segundo plano
+        Dificultad dificultad = (Dificultad) comboDificultad.getSelectedItem();
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        getContentPane().setEnabled(false);
+        new SwingWorker<MotorAjedrez, Void>() {
+            @Override
+            protected MotorAjedrez doInBackground() {
+                return new MotorPython();
+            }
+
+            @Override
+            protected void done() {
+                setCursor(Cursor.getDefaultCursor());
+                getContentPane().setEnabled(true);
+                try {
+                    MotorAjedrez motor = get();
+                    if (!motor.estaDisponible()) {
+                        String motivo = motor.motivoNoDisponible();
+                        motor.cerrar();
+                        JOptionPane.showMessageDialog(PantallaMenu.this,
+                                "No se pudo iniciar la IA.\n" + motivo,
+                                "IA no disponible", JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                    abrirPartida(colorJugador, motor, dificultad);
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(PantallaMenu.this,
+                            "No se pudo iniciar la IA.\n" + e.getMessage(),
+                            "IA no disponible", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void abrirPartida(Color colorJugador, MotorAjedrez motor, Dificultad dificultad) {
+        SesionDePartida sesion = new SesionDePartida(new PartidaAjedrez(), colorJugador,
+                perfilSeleccionado, cuentas, motor, dificultad);
+        VentanaAjedrez ventana = new VentanaAjedrez(sesion, motor, this);
         ventana.setVisible(true);
         this.setVisible(false);
     }

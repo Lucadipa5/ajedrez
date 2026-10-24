@@ -1,4 +1,4 @@
-package ajedrez.adaptadores.ui.swing.perfil;
+package ajedrez.nucleo.perfil;
 
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;

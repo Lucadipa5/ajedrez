@@ -13,8 +13,17 @@ import ajedrez.nucleo.fabrica.FabricaPiezas;
 import ajedrez.nucleo.reglas.DetectorJaque;
 import ajedrez.nucleo.reglas.ValidadorMovimiento;
 import ajedrez.nucleo.servicio.PartidaAjedrez;
+import ajedrez.nucleo.dominio.Jugada;
+import ajedrez.nucleo.ia.Dificultad;
+import ajedrez.nucleo.ia.MotorAjedrez;
+import ajedrez.nucleo.perfil.PerfilJugador;
+import ajedrez.nucleo.perfil.RepositorioPerfiles;
+import ajedrez.nucleo.perfil.ServicioCuentas;
+import ajedrez.nucleo.servicio.SesionDePartida;
+import ajedrez.nucleo.tablero.NotacionFEN;
 import ajedrez.nucleo.tablero.Tablero;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,6 +51,11 @@ public class TestRunner {
         testPromocionUndoRestauraPeonOriginal();
         testPromocionConCapturaYUndoRestauraAmbas();
         testPartidaFlujoCompletoConUndo();
+        testNotacionFENPosicionInicial();
+        testJugadaDesdeUCI();
+        testServicioCuentas();
+        testXPSoloParaElColorDelJugador();
+        testDeshacerContraIADeshaceAmbasJugadas();
 
         System.out.println("=======================================================");
         System.out.println(" RESULTADO: " + testsPasados + "/" + testsTotales + " tests pasaron con éxito.");
@@ -276,5 +290,93 @@ public class TestRunner {
         afirmar(partida.getEstadoActual().getColorTurnoActual() == Color.BLANCO, "Deshacer retorna el turno a Blancas");
         afirmar(partida.getTablero().estaOcupada(peonE2), "Peón regresó a e2");
         afirmar(!partida.getTablero().estaOcupada(peonE4), "Casilla e4 vuelve a estar vacía");
+    }
+
+    // -----------------------------------------------------------------------
+    // Notación FEN / UCI (usadas por el adaptador de IA)
+    // -----------------------------------------------------------------------
+    private static void testNotacionFENPosicionInicial() {
+        PartidaAjedrez partida = new PartidaAjedrez();
+        String fen = NotacionFEN.desdeTablero(partida.getTablero(), Color.BLANCO);
+        afirmar(fen.equals("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1"),
+                "FEN de la posición inicial es correcta");
+    }
+
+    private static void testJugadaDesdeUCI() {
+        Jugada j = Jugada.desdeUCI("e2e4");
+        afirmar(j != null && j.getOrigen().equals(new Posicion(6, 4)) && j.getDestino().equals(new Posicion(4, 4)),
+                "UCI e2e4 se traduce a (6,4) -> (4,4)");
+        Jugada corona = Jugada.desdeUCI("a7a8q");
+        afirmar(corona != null && corona.getPromocion() == TipoPieza.REINA, "UCI a7a8q corona Reina");
+        afirmar(Jugada.desdeUCI("z9z9") == null, "UCI inválida devuelve null");
+    }
+
+    // -----------------------------------------------------------------------
+    // Cuentas y XP (con un repositorio en memoria, sin archivos)
+    // -----------------------------------------------------------------------
+    private static class RepositorioEnMemoria implements RepositorioPerfiles {
+        private List<PerfilJugador> perfiles = new ArrayList<>();
+        @Override public List<PerfilJugador> cargarTodos() {
+            List<PerfilJugador> copia = new ArrayList<>();
+            for (PerfilJugador p : perfiles) copia.add(p.copiar());
+            return copia;
+        }
+        @Override public void guardarTodos(List<PerfilJugador> lista) {
+            perfiles = new ArrayList<>();
+            for (PerfilJugador p : lista) perfiles.add(p.copiar());
+        }
+    }
+
+    private static void testServicioCuentas() {
+        ServicioCuentas cuentas = new ServicioCuentas(new RepositorioEnMemoria());
+        afirmar(cuentas.registrar("ana", "clave".toCharArray()) != null, "Registro de cuenta nueva");
+        afirmar(cuentas.registrar("ANA", "otra".toCharArray()) == null, "No se puede registrar un usuario repetido");
+        afirmar(cuentas.iniciarSesion("ana", "clave".toCharArray()) != null, "Inicio de sesión con contraseña correcta");
+        afirmar(cuentas.iniciarSesion("ana", "mala".toCharArray()) == null, "Inicio de sesión rechaza contraseña incorrecta");
+    }
+
+    private static void testXPSoloParaElColorDelJugador() {
+        ServicioCuentas cuentas = new ServicioCuentas(new RepositorioEnMemoria());
+        PerfilJugador perfil = cuentas.registrar("juan", "1234".toCharArray());
+        // El jugador eligió Negras: las capturas de las Blancas no le dan XP
+        SesionDePartida sesion = new SesionDePartida(new PartidaAjedrez(), Color.NEGRO, perfil, cuentas, null, null);
+        sesion.mover(Jugada.desdeUCI("e2e4"));
+        sesion.mover(Jugada.desdeUCI("d7d5"));
+        SesionDePartida.ResultadoJugada blancasComen = sesion.mover(Jugada.desdeUCI("e4d5"));
+        afirmar(blancasComen.eventosXP().isEmpty(), "Captura del rival no da XP");
+        SesionDePartida.ResultadoJugada negrasComen = sesion.mover(Jugada.desdeUCI("d8d5"));
+        afirmar(negrasComen.eventosXP().size() == 1 && sesion.getPerfil().getPuntosAcumulados() == PerfilJugador.PUNTOS_COMER_PIEZA,
+                "Captura del jugador da XP");
+
+        sesion.deshacer();
+        afirmar(sesion.getPerfil().getPuntosAcumulados() == 0, "Deshacer quita la XP de la jugada");
+        sesion.rehacer();
+        afirmar(sesion.getPerfil().getPuntosAcumulados() == PerfilJugador.PUNTOS_COMER_PIEZA, "Rehacer la recupera sin duplicarla");
+        sesion.deshacer();
+        sesion.mover(Jugada.desdeUCI("d8d5"));
+        afirmar(sesion.getPerfil().getPuntosAcumulados() == PerfilJugador.PUNTOS_COMER_PIEZA,
+                "Deshacer y volver a capturar no suma XP dos veces");
+    }
+
+    private static void testDeshacerContraIADeshaceAmbasJugadas() {
+        MotorAjedrez motorFalso = new MotorAjedrez() {
+            @Override public boolean estaDisponible() { return true; }
+            @Override public String motivoNoDisponible() { return null; }
+            @Override public Jugada elegirJugada(Tablero t, Color turno, Dificultad d) { return Jugada.desdeUCI("e7e5"); }
+            @Override public void cerrar() {}
+        };
+        SesionDePartida sesion = new SesionDePartida(new PartidaAjedrez(), Color.BLANCO, null, null, motorFalso, Dificultad.MEDIA);
+        sesion.mover(Jugada.desdeUCI("e2e4"));
+        afirmar(sesion.esTurnoDeLaIA(), "Después de mover el jugador, es turno de la IA");
+        try {
+            sesion.mover(sesion.calcularJugadaIA());
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+        afirmar(!sesion.esTurnoDeLaIA(), "La IA jugó y vuelve a ser turno del jugador");
+        sesion.deshacer();
+        afirmar(sesion.getPartida().getTablero().estaOcupada(new Posicion(6, 4))
+                        && sesion.getPartida().getEstadoActual().getColorTurnoActual() == Color.BLANCO,
+                "Deshacer contra la IA vuelve a antes de la jugada del jugador");
     }
 }
