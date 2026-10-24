@@ -20,9 +20,6 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.KeyEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,7 +33,7 @@ import java.util.Map;
  * Solo se ocupa de mostrar el tablero y traducir clicks en jugadas: las reglas del juego,
  * la XP y el turno de la IA los resuelve el núcleo a través de {@link SesionDePartida}.
  *
- * - Tablero con coordenadas que se mantiene cuadrado al cambiar el tamaño
+ * - Tablero temático (Summoner's Rift) en perspectiva, dibujado por {@link VistaTablero}
  * - Pantalla completa (botón, F11; Esc para salir)
  * - Marcas animadas de movimientos posibles y de la última jugada
  * - Jaque resaltado: el rey brilla en rojo, el tablero se sacude y aparece un cartel
@@ -48,12 +45,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // -----------------------------------------------------------------------
     // Paleta visual
     // -----------------------------------------------------------------------
-    private static final java.awt.Color COLOR_CASILLA_CLARA = new java.awt.Color(240, 217, 181);
-    private static final java.awt.Color COLOR_CASILLA_OSCURA = new java.awt.Color(181, 136, 99);
-    private static final java.awt.Color COLOR_SELECCIONADO = new java.awt.Color(246, 236, 90);
-    private static final java.awt.Color COLOR_ULTIMA_JUGADA = new java.awt.Color(205, 210, 106);
     private static final java.awt.Color BG_PANEL = new java.awt.Color(35, 32, 28);
-    private static final java.awt.Color COLOR_COORD = new java.awt.Color(200, 180, 140);
     private static final java.awt.Color COLOR_DORADO = new java.awt.Color(212, 175, 55);
     private static final java.awt.Color COLOR_JAQUE = new java.awt.Color(230, 50, 40);
     private static final java.awt.Color COLOR_TEXTO = new java.awt.Color(235, 230, 220);
@@ -67,9 +59,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     private final PantallaMenu menuOrigen;
     private final boolean tableroInvertido;      // las negras abajo si el jugador eligió negras
 
-    private final CasillaBoton[][] botonesCasillas = new CasillaBoton[8][8]; // indexado por posición lógica
-    private final PanelTableroCuadrado panelTableroConCoordenadas;
-    private JPanel panelTablero;
+    private final VistaTablero vistaTablero;
     private Posicion casillaSeleccionada = null;
     private List<Posicion> destinosLegalesActuales = List.of();
     private Jugada ultimaJugada = null;
@@ -167,9 +157,10 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         setLayout(new BorderLayout());
         getContentPane().setBackground(BG_PANEL);
 
-        panelTableroConCoordenadas = new PanelTableroCuadrado();
+        vistaTablero = new VistaTablero(tableroInvertido);
+        vistaTablero.setAlClickear(this::onCasillaClick);
         add(construirPanelSuperior(), BorderLayout.NORTH);
-        add(panelTableroConCoordenadas, BorderLayout.CENTER);
+        add(vistaTablero, BorderLayout.CENTER);
         add(construirPanelInferior(), BorderLayout.SOUTH);
         configurarAtajosDeTeclado();
 
@@ -177,8 +168,8 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         timerPulsoJaque = new Timer(40, e -> {
             float fase = (float) ((System.currentTimeMillis() - inicioPulso) / 1000.0 * Math.PI * 2 * 0.9);
             float pulso = 0.5f + 0.5f * (float) Math.sin(fase);
-            for (CasillaBoton[] fila : botonesCasillas)
-                for (CasillaBoton b : fila) b.setPulso(pulso);
+            vistaTablero.pulso = pulso;
+            vistaTablero.repaint();
             cartelJaque.setPulso(pulso);
         });
 
@@ -258,107 +249,21 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         return panel;
     }
 
-    // -----------------------------------------------------------------------
-    // Tablero con coordenadas que se mantiene cuadrado y centrado
-    // -----------------------------------------------------------------------
-    private class PanelTableroCuadrado extends JPanel {
-        private final JPanel letrasArriba = construirFilaLetras();
-        private final JPanel letrasAbajo = construirFilaLetras();
-        private final JPanel numerosIzq = construirColumnaNumeros();
-        private final JPanel numerosDer = construirColumnaNumeros();
-        private int desplazamientoX = 0; // para la sacudida del jaque
-
-        PanelTableroCuadrado() {
-            setLayout(null);
-            setBackground(BG_PANEL);
-            panelTablero = construirPanelTablero();
-            add(letrasArriba);
-            add(letrasAbajo);
-            add(numerosIzq);
-            add(numerosDer);
-            add(panelTablero);
-        }
-
-        @Override
-        public void doLayout() {
-            int margen = Math.max(18, Math.min(getWidth(), getHeight()) / 30);
-            int disponible = Math.min(getWidth() - 2 * margen - 16, getHeight() - 2 * margen - 8);
-            int borde = 3;
-            int lado = Math.max(8, (disponible - 2 * borde) / 8 * 8) + 2 * borde;
-            int x = (getWidth() - lado) / 2 + desplazamientoX;
-            int y = (getHeight() - lado) / 2;
-
-            panelTablero.setBounds(x, y, lado, lado);
-            letrasArriba.setBounds(x + borde, y - margen, lado - 2 * borde, margen);
-            letrasAbajo.setBounds(x + borde, y + lado, lado - 2 * borde, margen);
-            numerosIzq.setBounds(x - margen, y + borde, margen, lado - 2 * borde);
-            numerosDer.setBounds(x + lado, y + borde, margen, lado - 2 * borde);
-
-            Font fuente = new Font("Segoe UI", Font.BOLD, Math.max(12, lado / 52));
-            for (JPanel p : new JPanel[]{letrasArriba, letrasAbajo, numerosIzq, numerosDer})
-                for (Component c : p.getComponents()) c.setFont(fuente);
-        }
-
-        /** Sacude el tablero de lado a lado (se usa al dar jaque). */
-        void sacudir() {
-            long inicio = System.currentTimeMillis();
-            Timer t = new Timer(16, null);
-            t.addActionListener(e -> {
-                float p = (System.currentTimeMillis() - inicio) / 380f;
-                if (p >= 1f) {
-                    desplazamientoX = 0;
-                    t.stop();
-                } else {
-                    desplazamientoX = (int) Math.round(Math.sin(p * Math.PI * 7) * 9 * (1 - p));
-                }
-                doLayout();
-                repaint();
-            });
-            t.start();
-        }
-    }
-
-    private JPanel construirFilaLetras() {
-        JPanel fila = new JPanel(new GridLayout(1, 8));
-        fila.setBackground(BG_PANEL);
-        for (int i = 0; i < 8; i++) {
-            int col = tableroInvertido ? 7 - i : i;
-            JLabel lbl = new JLabel(String.valueOf((char) ('a' + col)), SwingConstants.CENTER);
-            lbl.setForeground(COLOR_COORD);
-            fila.add(lbl);
-        }
-        return fila;
-    }
-
-    private JPanel construirColumnaNumeros() {
-        JPanel col = new JPanel(new GridLayout(8, 1));
-        col.setBackground(BG_PANEL);
-        for (int i = 0; i < 8; i++) {
-            int fila = tableroInvertido ? 7 - i : i;  // fila 0 del array → número 8
-            JLabel lbl = new JLabel(String.valueOf(8 - fila), SwingConstants.CENTER);
-            lbl.setForeground(COLOR_COORD);
-            col.add(lbl);
-        }
-        return col;
-    }
-
-    private JPanel construirPanelTablero() {
-        JPanel tablero = new JPanel(new GridLayout(8, 8));
-        tablero.setBorder(BorderFactory.createLineBorder(new java.awt.Color(25, 22, 18), 3));
-
-        // Las casillas se agregan en orden visual; si el tablero está invertido se recorren al revés
-        for (int filaVisual = 0; filaVisual < 8; filaVisual++) {
-            for (int colVisual = 0; colVisual < 8; colVisual++) {
-                int fila = tableroInvertido ? 7 - filaVisual : filaVisual;
-                int col = tableroInvertido ? 7 - colVisual : colVisual;
-                CasillaBoton boton = new CasillaBoton();
-                Posicion pos = new Posicion(fila, col);
-                boton.addActionListener(e -> onCasillaClick(pos));
-                botonesCasillas[fila][col] = boton;
-                tablero.add(boton);
+    /** Sacude el tablero de lado a lado (se usa al dar jaque). */
+    private void sacudirTablero() {
+        long inicio = System.currentTimeMillis();
+        Timer t = new Timer(16, null);
+        t.addActionListener(e -> {
+            float p = (System.currentTimeMillis() - inicio) / 380f;
+            if (p >= 1f) {
+                vistaTablero.desplazamientoX = 0;
+                t.stop();
+            } else {
+                vistaTablero.desplazamientoX = (int) Math.round(Math.sin(p * Math.PI * 7) * 9 * (1 - p));
             }
-        }
-        return tablero;
+            vistaTablero.repaint();
+        });
+        t.start();
     }
 
     // -----------------------------------------------------------------------
@@ -589,46 +494,37 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         Posicion reyEnJaque = posicionReyAmenazado();
         boolean esMate = partida.getEstadoActual() instanceof EstadoJaqueMate;
 
+        VistaTablero v = vistaTablero;
         for (int fila = 0; fila < 8; fila++) {
             for (int col = 0; col < 8; col++) {
                 Posicion pos = new Posicion(fila, col);
-                CasillaBoton boton = botonesCasillas[fila][col];
                 Pieza pieza = tablero.obtenerPieza(pos);
 
+                v.imagenPieza[fila][col] = null;
+                v.simboloPieza[fila][col] = null;
                 if (pieza != null) {
                     BufferedImage imgPieza = (pieza.getColor() == Color.NEGRO)
                             ? imagenesNegras.get(pieza.getTipo())
                             : imagenesBlancas.get(pieza.getTipo());
                     if (imgPieza != null) {
-                        boton.setPiezaImagen(imgPieza);
+                        v.imagenPieza[fila][col] = imgPieza;
                     } else {
-                        java.awt.Color colorTexto = (pieza.getColor() == Color.BLANCO)
-                                ? new java.awt.Color(255, 255, 255)
-                                : new java.awt.Color(20, 20, 20);
-                        boton.setPiezaVisual(pieza.getSimboloUnicode(), colorTexto);
+                        v.simboloPieza[fila][col] = pieza.getSimboloUnicode();
+                        v.colorSimbolo[fila][col] = pieza.getColor() == Color.BLANCO
+                                ? java.awt.Color.WHITE : new java.awt.Color(20, 20, 20);
                     }
-                } else {
-                    boton.setPiezaVisual("", java.awt.Color.BLACK);
                 }
 
-                boolean esCasillaClara = (fila + col) % 2 == 0;
-                java.awt.Color colorBase = esCasillaClara ? COLOR_CASILLA_CLARA : COLOR_CASILLA_OSCURA;
-                boolean esSeleccionada = casillaSeleccionada != null && casillaSeleccionada.equals(pos);
-                boolean esUltimaJugada = ultimaJugada != null
+                v.ultimaJugada[fila][col] = ultimaJugada != null
                         && (ultimaJugada.getOrigen().equals(pos) || ultimaJugada.getDestino().equals(pos));
-                boolean esDestino = destinosLegalesActuales.contains(pos);
-
-                if (esSeleccionada) {
-                    boton.setBackground(mezclar(colorBase, COLOR_SELECCIONADO, 0.55f));
-                } else if (esUltimaJugada) {
-                    boton.setBackground(mezclar(colorBase, COLOR_ULTIMA_JUGADA, 0.5f));
-                } else {
-                    boton.setBackground(colorBase);
-                }
-                boton.setHighlight(esDestino, esDestino && pieza != null, esSeleccionada);
-                boton.setJaque(pos.equals(reyEnJaque), esMate);
+                v.destino[fila][col] = destinosLegalesActuales.contains(pos);
+                v.captura[fila][col] = v.destino[fila][col] && pieza != null;
             }
         }
+        v.seleccionada = casillaSeleccionada;
+        v.reyEnJaque = reyEnJaque;
+        v.esMate = esMate;
+        v.repaint();
 
         if (reyEnJaque != null && !esMate) {
             if (!timerPulsoJaque.isRunning()) timerPulsoJaque.start();
@@ -675,7 +571,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     private void anunciarJaque(boolean esMate) {
         Posicion rey = posicionReyAmenazado();
         if (rey == null) return;
-        panelTableroConCoordenadas.sacudir();
+        sacudirTablero();
         capaXP.mostrar(esMate ? "¡JAQUE MATE!" : "¡JAQUE!", null,
                 centroDeCasilla(rey), 0, esMate ? 34f : 28f, new java.awt.Color(255, 90, 75));
     }
@@ -694,14 +590,12 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
             timerMarcas = new Timer(15, e -> {
                 float p = Math.min(1f, (System.currentTimeMillis() - inicioAnimacionMarcas) / (float) DURACION_MARCAS_MS);
                 // ease-out con rebote leve (pasa de 1 y vuelve)
-                float escala = (float) (1 + 2.2 * Math.pow(p - 1, 3) + 1.2 * Math.pow(p - 1, 2));
-                for (CasillaBoton[] fila : botonesCasillas)
-                    for (CasillaBoton b : fila) b.setEscalaMarca(escala);
+                vistaTablero.escalaMarca = (float) (1 + 2.2 * Math.pow(p - 1, 3) + 1.2 * Math.pow(p - 1, 2));
+                vistaTablero.repaint();
                 if (p >= 1f) ((Timer) e.getSource()).stop();
             });
         }
-        for (CasillaBoton[] fila : botonesCasillas)
-            for (CasillaBoton b : fila) b.setEscalaMarca(0f);
+        vistaTablero.escalaMarca = 0f;
         timerMarcas.restart();
     }
 
@@ -763,13 +657,11 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     }
 
     private Point centroDeCasilla(Posicion pos) {
-        CasillaBoton b = botonesCasillas[pos.getFila()][pos.getColumna()];
-        return SwingUtilities.convertPoint(b, b.getWidth() / 2, b.getHeight() / 2, capaXP);
+        return SwingUtilities.convertPoint(vistaTablero, vistaTablero.centroDeCasilla(pos), capaXP);
     }
 
     private Point centroDelTablero() {
-        return SwingUtilities.convertPoint(panelTablero,
-                panelTablero.getWidth() / 2, panelTablero.getHeight() / 2, capaXP);
+        return SwingUtilities.convertPoint(vistaTablero, vistaTablero.centroDelTablero(), capaXP);
     }
 
     // -----------------------------------------------------------------------
@@ -873,167 +765,5 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
             g2.drawString(texto, (getWidth() - fm.stringWidth(texto)) / 2, 2 + (alto - fm.getHeight()) / 2 + fm.getAscent());
             g2.dispose();
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Casilla del tablero
-    // -----------------------------------------------------------------------
-    private static class CasillaBoton extends JButton {
-        private String textoPieza = "";
-        private java.awt.Color colorPieza = java.awt.Color.BLACK;
-        private BufferedImage imagenPieza = null;
-        private boolean esDestino = false;
-        private boolean esCaptura = false;
-        private boolean esSeleccionada = false;
-        private boolean hover = false;
-        private float escalaMarca = 1f;
-        private boolean enJaque = false;
-        private boolean esMate = false;
-        private float pulso = 1f;
-
-        public CasillaBoton() {
-            setFocusPainted(false);
-            setBorderPainted(false);
-            setOpaque(true);
-            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            addMouseListener(new MouseAdapter() {
-                @Override public void mouseEntered(MouseEvent e) { hover = true;  repaint(); }
-                @Override public void mouseExited(MouseEvent e)  { hover = false; repaint(); }
-            });
-        }
-
-        public void setEscalaMarca(float escala) {
-            if (escalaMarca == escala) return;
-            this.escalaMarca = escala;
-            if (esDestino) repaint();
-        }
-
-        public void setPiezaVisual(String texto, java.awt.Color color) {
-            this.textoPieza = texto != null ? texto : "";
-            this.colorPieza = color;
-            this.imagenPieza = null;
-            repaint();
-        }
-
-        public void setPiezaImagen(BufferedImage imagen) {
-            this.imagenPieza = imagen;
-            this.textoPieza = "";
-            repaint();
-        }
-
-        public void setHighlight(boolean esDestino, boolean esCaptura, boolean esSeleccionada) {
-            this.esDestino = esDestino;
-            this.esCaptura = esCaptura;
-            this.esSeleccionada = esSeleccionada;
-            repaint();
-        }
-
-        public void setJaque(boolean enJaque, boolean esMate) {
-            this.enJaque = enJaque;
-            this.esMate = esMate;
-            repaint();
-        }
-
-        public void setPulso(float pulso) {
-            this.pulso = pulso;
-            if (enJaque) repaint();
-        }
-
-        @Override
-        protected void paintComponent(Graphics g) {
-            super.paintComponent(g);
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-
-            int w = getWidth();
-            int h = getHeight();
-            int lado = Math.min(w, h);
-            float cx = w / 2f;
-            float cy = h / 2f;
-
-            // --- Rey en jaque: brillo rojo radial (late; fijo e intenso si es mate) ---
-            if (enJaque) {
-                float intensidad = esMate ? 1f : 0.55f + 0.45f * pulso;
-                int a = Math.round(235 * intensidad);
-                RadialGradientPaint brillo = new RadialGradientPaint(
-                        new java.awt.geom.Point2D.Float(cx, cy), lado * 0.72f,
-                        new float[]{0f, 0.45f, 1f},
-                        new java.awt.Color[]{
-                                new java.awt.Color(255, 40, 30, a),
-                                new java.awt.Color(230, 30, 20, Math.round(a * 0.65f)),
-                                new java.awt.Color(200, 0, 0, 0)});
-                g2.setPaint(brillo);
-                g2.fillRect(0, 0, w, h);
-                g2.setColor(new java.awt.Color(200, 20, 15, Math.round(200 * intensidad)));
-                g2.setStroke(new BasicStroke(3f));
-                g2.drawRect(1, 1, w - 3, h - 3);
-            }
-
-            // --- Hover sobre un destino legal: se ilumina la casilla ---
-            if (esDestino && hover) {
-                g2.setColor(esCaptura ? COLOR_HOVER_CAPTURA : COLOR_HOVER_DESTINO);
-                g2.fillRect(0, 0, w, h);
-            }
-
-            // --- Marca de destino legal (aparece con animación de escala) ---
-            if (esDestino && !(hover && !esCaptura)) {
-                if (!esCaptura) {
-                    float r = lado * 0.16f * escalaMarca;
-                    g2.setColor(COLOR_MARCA);
-                    g2.fill(new Ellipse2D.Float(cx - r, cy - r, r * 2, r * 2));
-                } else {
-                    float grosor = lado * 0.085f;
-                    float r = (lado / 2f - grosor / 2f - 1) * (0.7f + 0.3f * escalaMarca);
-                    g2.setColor(hover ? COLOR_MARCA_CAPTURA_HOVER : COLOR_MARCA_CAPTURA);
-                    g2.setStroke(new BasicStroke(grosor));
-                    g2.draw(new Ellipse2D.Float(cx - r, cy - r, r * 2, r * 2));
-                }
-            }
-
-            // --- Casilla seleccionada: borde interior fino ---
-            if (esSeleccionada) {
-                g2.setColor(COLOR_BORDE_SELECCION);
-                g2.setStroke(new BasicStroke(3f));
-                g2.drawRect(1, 1, w - 3, h - 3);
-            }
-
-            // --- Pieza ---
-            if (imagenPieza != null) {
-                int margen = Math.max(4, lado / 20);
-                int maxW = w - margen * 2;
-                int maxH = h - margen * 2;
-                double scale = Math.min((double) maxW / imagenPieza.getWidth(), (double) maxH / imagenPieza.getHeight());
-                int drawW = (int) Math.round(imagenPieza.getWidth() * scale);
-                int drawH = (int) Math.round(imagenPieza.getHeight() * scale);
-                g2.drawImage(imagenPieza, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH, null);
-            } else if (!textoPieza.isEmpty()) {
-                g2.setFont(new Font(PantallaMenu.FUENTE_AJEDREZ, Font.BOLD, Math.max(12, (int) (lado * 0.62f))));
-                FontMetrics fm = g2.getFontMetrics();
-                int x = (w - fm.stringWidth(textoPieza)) / 2;
-                int y = (h - fm.getHeight()) / 2 + fm.getAscent();
-                java.awt.Color sombra = colorPieza.equals(java.awt.Color.WHITE)
-                        ? new java.awt.Color(30, 30, 30, 180)
-                        : new java.awt.Color(220, 220, 220, 130);
-                g2.setColor(sombra);
-                g2.drawString(textoPieza, x - 1, y);
-                g2.drawString(textoPieza, x + 1, y);
-                g2.drawString(textoPieza, x, y - 1);
-                g2.drawString(textoPieza, x, y + 1);
-                g2.setColor(colorPieza);
-                g2.drawString(textoPieza, x, y);
-            }
-
-            g2.dispose();
-        }
-
-        // Colores para las marcas de movimientos posibles
-        private static final java.awt.Color COLOR_MARCA                = new java.awt.Color(30, 25, 15, 60);
-        private static final java.awt.Color COLOR_MARCA_CAPTURA        = new java.awt.Color(30, 25, 15, 70);
-        private static final java.awt.Color COLOR_MARCA_CAPTURA_HOVER  = new java.awt.Color(200, 50, 40, 170);
-        private static final java.awt.Color COLOR_HOVER_DESTINO        = new java.awt.Color(120, 170, 70, 130);
-        private static final java.awt.Color COLOR_HOVER_CAPTURA        = new java.awt.Color(220, 80, 60, 60);
-        private static final java.awt.Color COLOR_BORDE_SELECCION      = new java.awt.Color(200, 170, 40, 200);
     }
 }
