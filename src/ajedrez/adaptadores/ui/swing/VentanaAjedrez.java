@@ -15,14 +15,11 @@ import ajedrez.nucleo.servicio.SesionDePartida.EventoXP;
 import ajedrez.nucleo.servicio.SesionDePartida.ResultadoJugada;
 import ajedrez.nucleo.tablero.Tablero;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,10 +42,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // -----------------------------------------------------------------------
     // Paleta visual
     // -----------------------------------------------------------------------
-    private static final java.awt.Color BG_PANEL = new java.awt.Color(35, 32, 28);
-    private static final java.awt.Color COLOR_DORADO = new java.awt.Color(212, 175, 55);
-    private static final java.awt.Color COLOR_JAQUE = new java.awt.Color(230, 50, 40);
-    private static final java.awt.Color COLOR_TEXTO = new java.awt.Color(235, 230, 220);
+    private static final java.awt.Color COLOR_JAQUE = Tema.ROJO_JAQUE;
 
     // -----------------------------------------------------------------------
     // Estado
@@ -103,15 +97,8 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     }
 
     private static void cargarImagenPieza(Map<TipoPieza, BufferedImage> cache, TipoPieza tipo, String nombreArchivo) {
-        try {
-            InputStream is = VentanaAjedrez.class.getResourceAsStream("recursos/" + nombreArchivo);
-            if (is != null) {
-                cache.put(tipo, ImageIO.read(is));
-                is.close();
-            }
-        } catch (IOException e) {
-            System.err.println("No se pudo cargar imagen: " + nombreArchivo);
-        }
+        BufferedImage img = Tema.cargarImagen(nombreArchivo);
+        if (img != null) cache.put(tipo, img);
     }
 
     // -----------------------------------------------------------------------
@@ -119,12 +106,13 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // -----------------------------------------------------------------------
     private final JLabel labelEstado = new JLabel("", SwingConstants.CENTER);
     private final CartelJaque cartelJaque = new CartelJaque();
-    private final JButton btnDeshacer = new JButton();
-    private final JButton btnRehacer = new JButton();
+    private final JButton btnDeshacer = new BotonTematico("Deshacer");
+    private final JButton btnRehacer = new BotonTematico("Rehacer");
 
     // Panel de perfil (barra de nivel)
     private JLabel lblNivel;
-    private JProgressBar barraExp;
+    private BarraXP barraExp;
+    private AvatarJugador avatarPerfil;
 
     // -----------------------------------------------------------------------
     // Constructor
@@ -155,7 +143,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         setGlassPane(capaXP);
 
         setLayout(new BorderLayout());
-        getContentPane().setBackground(BG_PANEL);
+        getContentPane().setBackground(Tema.FONDO_OSCURO);
 
         vistaTablero = new VistaTablero(tableroInvertido);
         vistaTablero.setAlClickear(this::onCasillaClick);
@@ -169,7 +157,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
             float fase = (float) ((System.currentTimeMillis() - inicioPulso) / 1000.0 * Math.PI * 2 * 0.9);
             float pulso = 0.5f + 0.5f * (float) Math.sin(fase);
             vistaTablero.pulso = pulso;
-            vistaTablero.repaint();
+            vistaTablero.repintarCasilla(vistaTablero.reyEnJaque); // solo la casilla del rey
             cartelJaque.setPulso(pulso);
         });
 
@@ -181,16 +169,15 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // Panel superior: estado del turno, jaque y perfil
     // -----------------------------------------------------------------------
     private JPanel construirPanelSuperior() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(BG_PANEL);
-        panel.setBorder(new EmptyBorder(8, 12, 4, 12));
+        JPanel panel = new BarraTematica(new BorderLayout(), true);
+        panel.setBorder(new EmptyBorder(8, 14, 8, 14));
 
         JPanel panelJuego = new JPanel();
         panelJuego.setLayout(new BoxLayout(panelJuego, BoxLayout.Y_AXIS));
-        panelJuego.setBackground(BG_PANEL);
+        panelJuego.setOpaque(false);
 
-        labelEstado.setFont(new Font("Segoe UI", Font.BOLD, 17));
-        labelEstado.setForeground(COLOR_TEXTO);
+        labelEstado.setFont(Tema.tituloEspaciado(20f, 0.04f));
+        labelEstado.setForeground(Tema.TEXTO);
         labelEstado.setAlignmentX(Component.CENTER_ALIGNMENT);
         cartelJaque.setAlignmentX(Component.CENTER_ALIGNMENT);
 
@@ -205,46 +192,55 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     }
 
     private JPanel construirPanelPerfil() {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(new java.awt.Color(45, 42, 38));
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(COLOR_DORADO, 1),
-                new EmptyBorder(6, 12, 6, 12)
-        ));
+        JPanel panel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                Tema.suavizar(g2);
+                Tema.pintarMarco(g2, 0, 0, getWidth(), getHeight());
+                g2.dispose();
+            }
+        };
+        panel.setOpaque(false);
+        panel.setLayout(new BorderLayout(10, 0));
+        panel.setBorder(new EmptyBorder(8, 12, 9, 16));
+
+        JPanel columna = new JPanel();
+        columna.setOpaque(false);
+        columna.setLayout(new BoxLayout(columna, BoxLayout.Y_AXIS));
+        panel.add(columna, BorderLayout.CENTER);
 
         PerfilJugador perfil = sesion.getPerfil();
         if (perfil != null) {
+            avatarPerfil = new AvatarJugador(48);
+            panel.add(avatarPerfil, BorderLayout.WEST);
+
             JLabel lblNombrePerfil = new JLabel(perfil.getNombre());
-            lblNombrePerfil.setFont(new Font("Segoe UI", Font.BOLD, 13));
-            lblNombrePerfil.setForeground(COLOR_DORADO);
+            lblNombrePerfil.setFont(Tema.titulo(15f));
+            lblNombrePerfil.setForeground(Tema.DORADO);
             lblNombrePerfil.setAlignmentX(Component.RIGHT_ALIGNMENT);
 
             lblNivel = new JLabel();
-            lblNivel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-            lblNivel.setForeground(new java.awt.Color(180, 175, 165));
+            lblNivel.setFont(Tema.texto(Font.PLAIN, 11f));
+            lblNivel.setForeground(Tema.TEXTO_SUAVE);
             lblNivel.setAlignmentX(Component.RIGHT_ALIGNMENT);
 
-            barraExp = new JProgressBar(0, 100);
-            barraExp.setStringPainted(true);
-            barraExp.setFont(new Font("Segoe UI", Font.BOLD, 10));
-            barraExp.setForeground(COLOR_DORADO);
-            barraExp.setBackground(new java.awt.Color(20, 18, 15));
-            barraExp.setPreferredSize(new Dimension(180, 16));
+            barraExp = new BarraXP(16);
+            barraExp.setPreferredSize(new Dimension(190, 16));
             barraExp.setMaximumSize(new Dimension(220, 16));
-            barraExp.setBorder(BorderFactory.createLineBorder(new java.awt.Color(80, 75, 70)));
+            barraExp.setAlignmentX(Component.RIGHT_ALIGNMENT);
 
-            panel.add(lblNombrePerfil);
-            panel.add(Box.createVerticalStrut(2));
-            panel.add(lblNivel);
-            panel.add(Box.createVerticalStrut(4));
-            panel.add(barraExp);
+            columna.add(lblNombrePerfil);
+            columna.add(Box.createVerticalStrut(2));
+            columna.add(lblNivel);
+            columna.add(Box.createVerticalStrut(4));
+            columna.add(barraExp);
             actualizarBarraPerfil();
         } else {
-            JLabel sinPerfil = new JLabel("Invitado");
-            sinPerfil.setFont(new Font("Segoe UI", Font.ITALIC, 12));
-            sinPerfil.setForeground(new java.awt.Color(130, 125, 115));
-            panel.add(sinPerfil);
+            JLabel sinPerfil = new JLabel("INVITADO");
+            sinPerfil.setFont(Tema.tituloEspaciado(13f, 0.12f));
+            sinPerfil.setForeground(Tema.TEXTO_SUAVE);
+            columna.add(sinPerfil);
         }
         return panel;
     }
@@ -270,11 +266,9 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // Panel inferior: controles
     // -----------------------------------------------------------------------
     private JPanel construirPanelInferior() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 10));
-        panel.setBackground(BG_PANEL);
-        panel.setBorder(new EmptyBorder(0, 0, 6, 0));
+        JPanel panel = new BarraTematica(new FlowLayout(FlowLayout.CENTER, 12, 10), false);
+        panel.setBorder(new EmptyBorder(2, 0, 4, 0));
 
-        estilizarBotonControl(btnDeshacer, "Deshacer");
         btnDeshacer.addActionListener(e -> {
             if (iaPensando) return;
             if (sesion.deshacer()) {
@@ -285,7 +279,6 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
             }
         });
 
-        estilizarBotonControl(btnRehacer, "Rehacer");
         btnRehacer.addActionListener(e -> {
             if (iaPensando) return;
             if (sesion.rehacer()) {
@@ -296,16 +289,13 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
             }
         });
 
-        JButton btnNuevaPartida = new JButton();
-        estilizarBotonControl(btnNuevaPartida, "Nueva Partida");
+        JButton btnNuevaPartida = new BotonTematico("Nueva Partida");
         btnNuevaPartida.addActionListener(e -> reiniciarPartida());
 
-        btnPantallaCompleta = new JButton();
-        estilizarBotonControl(btnPantallaCompleta, "Pantalla completa");
+        btnPantallaCompleta = new BotonTematico("Pantalla completa");
         btnPantallaCompleta.addActionListener(e -> alternarPantallaCompleta());
 
-        JButton btnMenu = new JButton();
-        estilizarBotonControl(btnMenu, "Menú");
+        JButton btnMenu = new BotonTematico("Menú");
         btnMenu.addActionListener(e -> onSalir());
 
         panel.add(btnDeshacer);
@@ -316,15 +306,27 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         return panel;
     }
 
-    private void estilizarBotonControl(JButton btn, String texto) {
-        btn.setText(texto);
-        btn.setFont(new Font("Segoe UI", Font.BOLD, 13));
-        btn.setForeground(new java.awt.Color(230, 225, 215));
-        btn.setBackground(new java.awt.Color(60, 58, 54));
-        btn.setBorderPainted(false);
-        btn.setFocusPainted(false);
-        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        btn.setBorder(new EmptyBorder(7, 14, 7, 14));
+    /** Barra superior/inferior: azul noche con una línea dorada hacia el tablero. */
+    private static class BarraTematica extends JPanel {
+        private final boolean lineaAbajo;
+
+        BarraTematica(LayoutManager layout, boolean lineaAbajo) {
+            super(layout);
+            this.lineaAbajo = lineaAbajo;
+            setOpaque(true);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            int w = getWidth(), h = getHeight();
+            java.awt.Color claro = new java.awt.Color(16, 26, 40), oscuro = Tema.FONDO_OSCURO;
+            g2.setPaint(new GradientPaint(0, 0, lineaAbajo ? oscuro : claro, 0, h, lineaAbajo ? claro : oscuro));
+            g2.fillRect(0, 0, w, h);
+            Tema.suavizar(g2);
+            Tema.pintarSeparador(g2, 0, lineaAbajo ? h - 1 : 0, w, null);
+            g2.dispose();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -367,12 +369,17 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // -----------------------------------------------------------------------
     @Override
     public TipoPieza solicitarPromocion(Color color) {
-        String[] opciones = {"Reina", "Torre", "Alfil", "Caballo"};
-        int sel = JOptionPane.showOptionDialog(this,
-                "¡Tu peón llegó a la última fila!\nElegí la pieza para coronar:",
-                "Coronación de Peón (" + color + ")",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
-                null, opciones, opciones[0]);
+        TipoPieza[] tipos = {TipoPieza.REINA, TipoPieza.TORRE, TipoPieza.ALFIL, TipoPieza.CABALLO};
+        Map<TipoPieza, BufferedImage> imagenes = color == Color.BLANCO ? imagenesBlancas : imagenesNegras;
+        String[] nombres = new String[tipos.length];
+        BufferedImage[] imgs = new BufferedImage[tipos.length];
+        for (int i = 0; i < tipos.length; i++) {
+            nombres[i] = tipos[i].getNombre();
+            imgs[i] = imagenes.get(tipos[i]);
+        }
+        // Esc o cerrar sin elegir corona Reina (opción por defecto)
+        int sel = Dialogos.elegirConImagenes(this, "Coronación",
+                "¡Tu peón llegó a la última fila! Elegí la pieza para coronar:", nombres, imgs);
         return switch (sel) {
             case 1 -> TipoPieza.TORRE;
             case 2 -> TipoPieza.ALFIL;
@@ -478,9 +485,8 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
                 } catch (Exception e) {
                     actualizarVista();
                     Throwable causa = e.getCause() != null ? e.getCause() : e;
-                    JOptionPane.showMessageDialog(VentanaAjedrez.this,
-                            "La IA no pudo jugar:\n" + causa.getMessage(),
-                            "Error de la IA", JOptionPane.ERROR_MESSAGE);
+                    Dialogos.mensaje(VentanaAjedrez.this, "Error de la IA",
+                            "La IA no pudo jugar:\n" + causa.getMessage(), Dialogos.Tipo.ERROR);
                 }
             }
         }.execute();
@@ -524,7 +530,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         v.seleccionada = casillaSeleccionada;
         v.reyEnJaque = reyEnJaque;
         v.esMate = esMate;
-        v.repaint();
+        v.invalidar();
 
         if (reyEnJaque != null && !esMate) {
             if (!timerPulsoJaque.isRunning()) timerPulsoJaque.start();
@@ -591,7 +597,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
                 float p = Math.min(1f, (System.currentTimeMillis() - inicioAnimacionMarcas) / (float) DURACION_MARCAS_MS);
                 // ease-out con rebote leve (pasa de 1 y vuelve)
                 vistaTablero.escalaMarca = (float) (1 + 2.2 * Math.pow(p - 1, 3) + 1.2 * Math.pow(p - 1, 2));
-                vistaTablero.repaint();
+                vistaTablero.repintarDestinos();
                 if (p >= 1f) ((Timer) e.getSource()).stop();
             });
         }
@@ -605,14 +611,15 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     private void actualizarBarraPerfil() {
         if (sesion.getPerfil() == null || barraExp == null) return;
         if (timerBarra != null) timerBarra.stop();
-        barraExp.setValue((int) (sesion.getPerfil().getProgresoBarra() * 100));
+        barraExp.setValor((int) (sesion.getPerfil().getProgresoBarra() * 100));
         actualizarTextosPerfil();
     }
 
     private void actualizarTextosPerfil() {
         PerfilJugador perfil = sesion.getPerfil();
-        barraExp.setString(perfil.getPuntosEnNivelActual() + "/" + perfil.getPuntosParaSiguienteNivel() + " XP");
+        barraExp.setTexto(perfil.getPuntosEnNivelActual() + "/" + perfil.getPuntosParaSiguienteNivel() + " XP");
         lblNivel.setText("Nivel " + perfil.getNivel());
+        if (avatarPerfil != null) avatarPerfil.setDatos(perfil.getFoto(), perfil.getNivel());
     }
 
     private void animarGananciaXP(EventoXP evento, Point centro, int retrasoMs) {
@@ -638,11 +645,11 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         final int[] destino = {pasarPorLleno ? 100 : objetivo};
         final boolean[] faltaSegundoTramo = {pasarPorLleno};
         timerBarra = new Timer(15, e -> {
-            int actual = barraExp.getValue();
+            int actual = barraExp.getValor();
             if (actual == destino[0]) {
                 if (faltaSegundoTramo[0]) {
                     faltaSegundoTramo[0] = false;
-                    barraExp.setValue(0);
+                    barraExp.setValor(0);
                     destino[0] = objetivo;
                 } else {
                     ((Timer) e.getSource()).stop();
@@ -651,7 +658,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
             }
             int diferencia = destino[0] - actual;
             int paso = Math.max(1, Math.abs(diferencia) / 8);
-            barraExp.setValue(actual + Integer.signum(diferencia) * paso);
+            barraExp.setValor(actual + Integer.signum(diferencia) * paso);
         });
         timerBarra.start();
     }
@@ -675,8 +682,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
 
         // Se espera a que se vean las animaciones antes de mostrar el cartel
         Timer espera = new Timer(1300, e ->
-                JOptionPane.showMessageDialog(this, mensaje, "Fin de partida",
-                        gane ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.PLAIN_MESSAGE));
+                Dialogos.mensaje(this, gane ? "Victoria" : "Fin de partida", mensaje, Dialogos.Tipo.INFO));
         espera.setRepeats(false);
         espera.start();
     }
@@ -693,10 +699,9 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     }
 
     private void onSalir() {
-        int resp = JOptionPane.showConfirmDialog(this,
+        if (!Dialogos.confirmar(this, "Salir de la partida",
                 "No se guardará el progreso de esta partida.\n¿Seguro que querés salir al menú principal?",
-                "Salir de la partida", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (resp != JOptionPane.YES_OPTION) return;
+                Dialogos.Tipo.ADVERTENCIA, "Salir", "Seguir jugando")) return;
 
         // No se guarda: se vuelve al último progreso guardado
         generacionPartida++;

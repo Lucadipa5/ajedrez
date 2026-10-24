@@ -12,27 +12,24 @@ import ajedrez.nucleo.servicio.SesionDePartida;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.awt.event.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.geom.Ellipse2D;
+import java.awt.image.BufferedImage;
+import java.awt.image.RescaleOp;
 import java.io.File;
+import java.io.IOException;
 import java.util.Arrays;
+import java.util.EnumMap;
+import java.util.Map;
 
 /**
- * Pantalla de menú principal.
- * Permite iniciar sesión o registrarse (usuario + contraseña) y elegir el color con el que se juega
- * antes de iniciar la partida.
+ * Pantalla de menú principal, con la misma estética que la partida (Summoner's Rift):
+ * fondo del mapa desenfocado, marcos azul noche con borde dorado y botones del tema.
+ * Permite iniciar sesión o registrarse, elegir el modo (2 jugadores / contra la IA)
+ * y el color con el que se juega.
  */
 public class PantallaMenu extends JFrame {
-
-    // Paleta de colores oscura estilo ajedrez
-    private static final java.awt.Color BG_DARK      = new java.awt.Color(30, 28, 25);
-    private static final java.awt.Color BG_CARD      = new java.awt.Color(45, 43, 40);
-    private static final java.awt.Color COLOR_DORADO  = new java.awt.Color(212, 175, 55);
-    private static final java.awt.Color COLOR_TEXTO   = new java.awt.Color(235, 230, 220);
-    private static final java.awt.Color COLOR_SUBTXT  = new java.awt.Color(160, 155, 145);
-    private static final java.awt.Color BTN_BLANCO    = new java.awt.Color(240, 230, 200);
-    private static final java.awt.Color BTN_NEGRO     = new java.awt.Color(55, 50, 45);
-    private static final java.awt.Color BTN_HOVER_BL  = new java.awt.Color(255, 245, 215);
-    private static final java.awt.Color BTN_HOVER_NG  = new java.awt.Color(70, 65, 60);
 
     /**
      * Busca una fuente que pueda renderizar símbolos Unicode de ajedrez (♔♕♖♗♘♙).
@@ -44,7 +41,7 @@ public class PantallaMenu extends JFrame {
             "Noto Sans Symbols2", "Noto Sans Symbols", "Symbola",
             "Segoe UI Emoji", "Apple Symbols", "Lucida Sans Unicode"
         };
-        char testChar = '\u2654'; // ♔ rey blanco
+        char testChar = '♔'; // ♔ rey blanco
         for (String nombre : candidatas) {
             Font f = new Font(nombre, Font.PLAIN, 12);
             if (f.canDisplay(testChar)) {
@@ -63,105 +60,223 @@ public class PantallaMenu extends JFrame {
 
     static final String FUENTE_AJEDREZ = obtenerFuenteAjedrez();
 
-    private PerfilJugador perfilSeleccionado = null;
-    private JLabel lblPerfilActual;
-    private JLabel lblNivelActual;
-    private JProgressBar barraExp;
-    private JButton btnIniciarSesion;
-    private JButton btnRegistrarse;
-    private JButton btnCerrarSesion;
-
+    private static final int ANCHO_CONTENIDO = 460;
     private static final int LARGO_MAX_USUARIO = 20;
     private static final int LARGO_MIN_CONTRASENA = 4;
 
     private final ServicioCuentas cuentas;
+    private PerfilJugador perfilSeleccionado = null;
+
+    // Tarjeta de perfil
+    private JLabel lblPerfilActual;
+    private JLabel lblNivelActual;
+    private AvatarJugador avatar;
+    private BarraXP barraExp;
+    private BotonTematico btnIniciarSesion;
+    private BotonTematico btnRegistrarse;
+    private BotonTematico btnCambiarFoto;
+    private BotonTematico btnCerrarSesion;
+
+    // Modo y dificultad
     private boolean contraIA = false;
-    private JButton btnModoDosJugadores;
-    private JButton btnModoIA;
-    private JComboBox<Dificultad> comboDificultad;
-    private JPanel filaDificultad;
+    private Dificultad dificultadElegida = Dificultad.MEDIA;
+    private BotonTematico btnModoDosJugadores;
+    private BotonTematico btnModoIA;
+    private JLabel lblDificultad;
+    private final Map<Dificultad, BotonTematico> botonesDificultad = new EnumMap<>(Dificultad.class);
 
     public PantallaMenu(ServicioCuentas cuentas) {
         this.cuentas = cuentas;
         setTitle("Ajedrez — Menú Principal");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(520, 780);
-        setLocationRelativeTo(null);
         setResizable(false);
-
-        // Ícono de la ventana (rey de ajedrez dibujado programáticamente)
         setIconImage(crearIconoAjedrez());
 
-        setContentPane(construirPanelPrincipal());
+        JPanel fondo = new Tema.PanelFondo(new BorderLayout());
+        fondo.add(construirEncabezado(), BorderLayout.NORTH);
+        fondo.add(construirPanelCentro(), BorderLayout.CENTER);
+        fondo.add(construirPanelCreditos(), BorderLayout.SOUTH);
+        setContentPane(fondo);
+
+        setSize(560, 800);
+        setLocationRelativeTo(null);
+        actualizarTarjetaPerfil();
     }
 
     // -----------------------------------------------------------------------
-    // Construcción del panel principal
+    // Encabezado: los dos reyes a los costados del título
     // -----------------------------------------------------------------------
-    private JPanel construirPanelPrincipal() {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BorderLayout());
-        panel.setBackground(BG_DARK);
+    private JComponent construirEncabezado() {
+        BufferedImage reyBlanco = Tema.cargarImagen("rey_blanco.png");
+        BufferedImage reyNegro = Tema.cargarImagen("rey_negro.png");
+        JComponent encabezado = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                Tema.suavizar(g2);
+                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                int w = getWidth();
+                int cx = w / 2;
 
-        panel.add(construirPanelTitulo(), BorderLayout.NORTH);
-        panel.add(construirPanelCentro(), BorderLayout.CENTER);
-        panel.add(construirPanelCreditos(), BorderLayout.SOUTH);
+                // Título con relleno dorado degradado y contorno oscuro
+                Font fuente = Tema.tituloEspaciado(58f, 0.06f);
+                Shape titulo = fuente.createGlyphVector(g2.getFontRenderContext(), "AJEDREZ").getOutline();
+                Rectangle bt = titulo.getBounds();
+                int tx = cx - bt.width / 2 - bt.x, ty = 112;
+                g2.translate(tx, ty);
+                g2.setColor(new java.awt.Color(0, 0, 0, 160));
+                g2.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.draw(titulo);
+                g2.setPaint(new GradientPaint(0, bt.y, Tema.DORADO_BRILLO, 0, bt.y + bt.height, new java.awt.Color(150, 110, 50)));
+                g2.fill(titulo);
+                g2.translate(-tx, -ty);
 
-        return panel;
+                // Reyes a los costados, con un halo
+                int alto = 92;
+                dibujarRey(g2, reyBlanco, cx - bt.width / 2 - 62, 40, alto, new java.awt.Color(10, 200, 185, 70));
+                dibujarRey(g2, reyNegro, cx + bt.width / 2 + 62, 40, alto, new java.awt.Color(220, 60, 50, 70));
+
+                Tema.pintarSeparador(g2, cx - 170, 140, 340, null);
+                g2.setFont(Tema.tituloEspaciado(13f, 0.3f));
+                g2.setColor(Tema.DORADO);
+                String sub = "INGENIERÍA DE SOFTWARE";
+                g2.drawString(sub, cx - g2.getFontMetrics().stringWidth(sub) / 2, 166);
+                g2.dispose();
+            }
+
+            private void dibujarRey(Graphics2D g2, BufferedImage img, int cx, int y, int alto, java.awt.Color halo) {
+                if (img == null) return;
+                int ancho = img.getWidth() * alto / img.getHeight();
+                g2.setPaint(new RadialGradientPaint(cx, y + alto / 2f, alto * 0.6f,
+                        new float[]{0f, 1f}, new java.awt.Color[]{halo, new java.awt.Color(0, 0, 0, 0)}));
+                g2.fill(new Ellipse2D.Double(cx - alto * 0.6, y + alto / 2.0 - alto * 0.6, alto * 1.2, alto * 1.2));
+                g2.drawImage(img, cx - ancho / 2, y, ancho, alto, null);
+            }
+        };
+        encabezado.setPreferredSize(new Dimension(560, 190));
+        return encabezado;
     }
 
     // -----------------------------------------------------------------------
-    // Panel superior: título y ícono decorativo
-    // -----------------------------------------------------------------------
-    private JPanel construirPanelTitulo() {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(BG_DARK);
-        panel.setBorder(new EmptyBorder(40, 20, 20, 20));
-
-        // Pieza decorativa grande
-        JLabel icono = new JLabel("♔", SwingConstants.CENTER);
-        icono.setFont(new Font(FUENTE_AJEDREZ, Font.PLAIN, 90));
-        icono.setForeground(COLOR_DORADO);
-        icono.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JLabel titulo = new JLabel("AJEDREZ", SwingConstants.CENTER);
-        titulo.setFont(new Font("Segoe UI", Font.BOLD, 38));
-        titulo.setForeground(COLOR_TEXTO);
-        titulo.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JLabel subtitulo = new JLabel("Ingeniería de Software", SwingConstants.CENTER);
-        subtitulo.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        subtitulo.setForeground(COLOR_DORADO);
-        subtitulo.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        panel.add(icono);
-        panel.add(Box.createVerticalStrut(8));
-        panel.add(titulo);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(subtitulo);
-
-        return panel;
-    }
-
-    // -----------------------------------------------------------------------
-    // Panel central: perfil + botones de juego
+    // Centro: perfil + nueva partida
     // -----------------------------------------------------------------------
     private JPanel construirPanelCentro() {
         JPanel panel = new JPanel();
+        panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(BG_DARK);
-        panel.setBorder(new EmptyBorder(10, 40, 10, 40));
+        panel.setBorder(new EmptyBorder(6, 0, 0, 0));
 
         panel.add(construirTarjetaPerfil());
-        panel.add(Box.createVerticalStrut(25));
+        panel.add(Box.createVerticalStrut(26));
         panel.add(construirSeparador("NUEVA PARTIDA"));
-        panel.add(Box.createVerticalStrut(15));
+        panel.add(Box.createVerticalStrut(16));
         panel.add(construirSelectorModo());
-        panel.add(Box.createVerticalStrut(15));
+        panel.add(Box.createVerticalStrut(18));
         panel.add(construirBotonesColor());
-
+        panel.add(Box.createVerticalGlue());
         return panel;
+    }
+
+    private JComponent construirSeparador(String texto) {
+        JComponent sep = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                Tema.suavizar(g2);
+                Tema.pintarSeparador(g2, 0, getHeight() / 2, getWidth(), texto);
+                g2.dispose();
+            }
+        };
+        fijarTamano(sep, ANCHO_CONTENIDO, 20);
+        return sep;
+    }
+
+    private static void fijarTamano(JComponent c, int w, int h) {
+        Dimension d = new Dimension(w, h);
+        c.setPreferredSize(d);
+        c.setMaximumSize(d);
+        c.setMinimumSize(d);
+        c.setAlignmentX(Component.CENTER_ALIGNMENT);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tarjeta de perfil
+    // -----------------------------------------------------------------------
+    private JPanel construirTarjetaPerfil() {
+        JPanel card = new JPanel(new BorderLayout(14, 0)) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                Tema.suavizar(g2);
+                Tema.pintarMarco(g2, 0, 0, getWidth(), getHeight());
+                g2.dispose();
+            }
+        };
+        card.setOpaque(false);
+        card.setBorder(new EmptyBorder(16, 18, 16, 18));
+        fijarTamano(card, ANCHO_CONTENIDO, 150);
+
+        // Avatar: con la sesión iniciada, un click permite cambiar la foto de perfil
+        avatar = new AvatarJugador(62);
+        avatar.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if (perfilSeleccionado != null) onCambiarFoto();
+            }
+        });
+
+        JPanel info = new JPanel();
+        info.setOpaque(false);
+        info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+        lblPerfilActual = new JLabel();
+        lblPerfilActual.setFont(Tema.titulo(19f));
+        lblPerfilActual.setForeground(Tema.TEXTO);
+        lblNivelActual = new JLabel();
+        lblNivelActual.setFont(Tema.texto(Font.PLAIN, 12f));
+        lblNivelActual.setForeground(Tema.TEXTO_SUAVE);
+        info.add(Box.createVerticalStrut(4));
+        info.add(lblPerfilActual);
+        info.add(Box.createVerticalStrut(3));
+        info.add(lblNivelActual);
+
+        JPanel botones = new JPanel();
+        botones.setOpaque(false);
+        botones.setLayout(new BoxLayout(botones, BoxLayout.Y_AXIS));
+        btnIniciarSesion = new BotonTematico("Iniciar sesión", 11f);
+        btnIniciarSesion.addActionListener(e -> onIniciarSesion());
+        btnRegistrarse = new BotonTematico("Registrarse", 11f);
+        btnRegistrarse.addActionListener(e -> onRegistrarse());
+        btnCambiarFoto = new BotonTematico("Cambiar foto", 11f);
+        btnCambiarFoto.addActionListener(e -> onCambiarFoto());
+        btnCerrarSesion = new BotonTematico("Cerrar sesión", 11f);
+        btnCerrarSesion.addActionListener(e -> onCerrarSesion());
+        for (JButton b : new JButton[]{btnIniciarSesion, btnRegistrarse, btnCambiarFoto, btnCerrarSesion}) {
+            fijarTamano(b, 138, 30);
+        }
+        botones.add(btnIniciarSesion);
+        botones.add(btnCambiarFoto);
+        botones.add(Box.createVerticalStrut(6));
+        botones.add(btnRegistrarse);
+        botones.add(btnCerrarSesion);
+
+        JPanel filaBarra = new JPanel(new BorderLayout(0, 5));
+        filaBarra.setOpaque(false);
+        filaBarra.setBorder(new EmptyBorder(12, 0, 0, 0));
+        JLabel lblExp = new JLabel("EXPERIENCIA");
+        lblExp.setFont(Tema.tituloEspaciado(10f, 0.25f));
+        lblExp.setForeground(Tema.DORADO);
+        barraExp = new BarraXP(18);
+        filaBarra.add(lblExp, BorderLayout.NORTH);
+        filaBarra.add(barraExp, BorderLayout.CENTER);
+
+        JPanel arriba = new JPanel(new BorderLayout(14, 0));
+        arriba.setOpaque(false);
+        arriba.add(avatar, BorderLayout.WEST);
+        arriba.add(info, BorderLayout.CENTER);
+        arriba.add(botones, BorderLayout.EAST);
+
+        card.add(arriba, BorderLayout.CENTER);
+        card.add(filaBarra, BorderLayout.SOUTH);
+        return card;
     }
 
     // -----------------------------------------------------------------------
@@ -169,182 +284,69 @@ public class PantallaMenu extends JFrame {
     // -----------------------------------------------------------------------
     private JPanel construirSelectorModo() {
         JPanel panel = new JPanel();
+        panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(BG_DARK);
-        panel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        panel.setMaximumSize(new Dimension(440, 80));
 
-        JPanel filaModos = new JPanel(new GridLayout(1, 2, 10, 0));
-        filaModos.setBackground(BG_DARK);
-        filaModos.setMaximumSize(new Dimension(440, 34));
-
-        btnModoDosJugadores = crearBotonSecundario("2 jugadores");
+        JPanel filaModos = new JPanel(new GridLayout(1, 2, 12, 0));
+        filaModos.setOpaque(false);
+        fijarTamano(filaModos, ANCHO_CONTENIDO, 40);
+        btnModoDosJugadores = new BotonTematico("2 jugadores", 13f);
         btnModoDosJugadores.addActionListener(e -> elegirModo(false));
-        btnModoIA = crearBotonSecundario("Contra la IA");
+        btnModoIA = new BotonTematico("Contra la IA", 13f);
         btnModoIA.addActionListener(e -> elegirModo(true));
         filaModos.add(btnModoDosJugadores);
         filaModos.add(btnModoIA);
 
-        filaDificultad = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 0));
-        filaDificultad.setBackground(BG_DARK);
-        JLabel lblDificultad = new JLabel("Dificultad:");
-        lblDificultad.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        lblDificultad.setForeground(COLOR_SUBTXT);
-        comboDificultad = new JComboBox<>(Dificultad.values());
-        comboDificultad.setSelectedItem(Dificultad.MEDIA);
-        comboDificultad.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        JPanel filaDificultad = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 0));
+        filaDificultad.setOpaque(false);
+        fijarTamano(filaDificultad, ANCHO_CONTENIDO, 30);
+        lblDificultad = new JLabel("DIFICULTAD");
+        lblDificultad.setFont(Tema.tituloEspaciado(11f, 0.2f));
+        lblDificultad.setBorder(new EmptyBorder(0, 0, 0, 6));
         filaDificultad.add(lblDificultad);
-        filaDificultad.add(comboDificultad);
+        for (Dificultad d : Dificultad.values()) {
+            BotonTematico b = new BotonTematico(d.getNombre(), 11f);
+            b.setPreferredSize(new Dimension(92, 28));
+            b.addActionListener(e -> elegirDificultad(d));
+            botonesDificultad.put(d, b);
+            filaDificultad.add(b);
+        }
 
         panel.add(filaModos);
-        panel.add(Box.createVerticalStrut(8));
+        panel.add(Box.createVerticalStrut(10));
         panel.add(filaDificultad);
 
         elegirModo(false);
+        elegirDificultad(Dificultad.MEDIA);
         return panel;
     }
 
     private void elegirModo(boolean ia) {
         contraIA = ia;
-        estilizarModo(btnModoDosJugadores, !ia);
-        estilizarModo(btnModoIA, ia);
-        filaDificultad.setVisible(ia);
+        btnModoDosJugadores.setSeleccionado(!ia);
+        btnModoIA.setSeleccionado(ia);
+        // La fila de dificultad queda siempre en su lugar (no "salta" el diseño), pero solo se usa contra la IA
+        lblDificultad.setForeground(ia ? Tema.DORADO : new java.awt.Color(90, 85, 75));
+        botonesDificultad.values().forEach(b -> b.setEnabled(ia));
     }
 
-    private void estilizarModo(JButton btn, boolean activo) {
-        btn.setBackground(activo ? COLOR_DORADO : new java.awt.Color(60, 58, 55));
-        btn.setForeground(activo ? BG_DARK : COLOR_DORADO);
-    }
-
-    // -----------------------------------------------------------------------
-    // Tarjeta de perfil
-    // -----------------------------------------------------------------------
-    private JPanel construirTarjetaPerfil() {
-        JPanel card = new JPanel();
-        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-        card.setBackground(BG_CARD);
-        card.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(COLOR_DORADO, 1),
-                new EmptyBorder(15, 20, 15, 20)
-        ));
-        card.setAlignmentX(Component.CENTER_ALIGNMENT);
-        card.setMaximumSize(new Dimension(440, 200));
-
-        // Fila: info + botones de cuenta
-        JPanel filaInfo = new JPanel(new BorderLayout(10, 0));
-        filaInfo.setBackground(BG_CARD);
-
-        JPanel infoTexto = new JPanel();
-        infoTexto.setLayout(new BoxLayout(infoTexto, BoxLayout.Y_AXIS));
-        infoTexto.setBackground(BG_CARD);
-
-        lblPerfilActual = new JLabel("Sin sesión iniciada");
-        lblPerfilActual.setFont(new Font("Segoe UI", Font.BOLD, 15));
-        lblPerfilActual.setForeground(COLOR_TEXTO);
-
-        lblNivelActual = new JLabel("Iniciá sesión o registrate para guardar tu progreso");
-        lblNivelActual.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        lblNivelActual.setForeground(COLOR_SUBTXT);
-
-        infoTexto.add(lblPerfilActual);
-        infoTexto.add(Box.createVerticalStrut(3));
-        infoTexto.add(lblNivelActual);
-
-        JPanel botonesGestion = new JPanel();
-        botonesGestion.setLayout(new BoxLayout(botonesGestion, BoxLayout.Y_AXIS));
-        botonesGestion.setBackground(BG_CARD);
-
-        btnIniciarSesion = crearBotonSecundario("Iniciar sesión");
-        btnIniciarSesion.addActionListener(e -> onIniciarSesion());
-
-        btnRegistrarse = crearBotonSecundario("Registrarse");
-        btnRegistrarse.addActionListener(e -> onRegistrarse());
-
-        btnCerrarSesion = crearBotonSecundario("Cerrar sesión");
-        btnCerrarSesion.addActionListener(e -> onCerrarSesion());
-        btnCerrarSesion.setVisible(false);
-
-        for (JButton b : new JButton[]{btnIniciarSesion, btnRegistrarse, btnCerrarSesion}) {
-            b.setAlignmentX(Component.RIGHT_ALIGNMENT);
-            b.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getPreferredSize().height));
-        }
-
-        botonesGestion.add(btnIniciarSesion);
-        botonesGestion.add(Box.createVerticalStrut(5));
-        botonesGestion.add(btnRegistrarse);
-        botonesGestion.add(btnCerrarSesion);
-
-        filaInfo.add(infoTexto, BorderLayout.CENTER);
-        filaInfo.add(botonesGestion, BorderLayout.EAST);
-
-        // Barra de experiencia
-        JPanel filaBarra = new JPanel(new BorderLayout(0, 4));
-        filaBarra.setBackground(BG_CARD);
-        filaBarra.setBorder(new EmptyBorder(12, 0, 0, 0));
-
-        JLabel lblExpTitulo = new JLabel("Experiencia");
-        lblExpTitulo.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        lblExpTitulo.setForeground(COLOR_SUBTXT);
-
-        barraExp = new JProgressBar(0, 100);
-        barraExp.setValue(0);
-        barraExp.setStringPainted(true);
-        barraExp.setString("0 / 0 XP");
-        barraExp.setFont(new Font("Segoe UI", Font.BOLD, 11));
-        barraExp.setForeground(COLOR_DORADO);
-        barraExp.setBackground(new java.awt.Color(20, 18, 15));
-        barraExp.setBorder(BorderFactory.createLineBorder(new java.awt.Color(80, 75, 70)));
-        barraExp.setPreferredSize(new Dimension(0, 22));
-
-        filaBarra.add(lblExpTitulo, BorderLayout.NORTH);
-        filaBarra.add(barraExp, BorderLayout.CENTER);
-
-        card.add(filaInfo);
-        card.add(filaBarra);
-
-        return card;
+    private void elegirDificultad(Dificultad d) {
+        dificultadElegida = d;
+        botonesDificultad.forEach((dif, b) -> b.setSeleccionado(dif == d));
     }
 
     // -----------------------------------------------------------------------
-    // Separador con título
-    // -----------------------------------------------------------------------
-    private JPanel construirSeparador(String texto) {
-        JPanel sep = new JPanel(new BorderLayout(10, 0));
-        sep.setBackground(BG_DARK);
-        sep.setMaximumSize(new Dimension(440, 20));
-        sep.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JSeparator izq = new JSeparator();
-        izq.setForeground(COLOR_DORADO);
-
-        JLabel lbl = new JLabel(texto);
-        lbl.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        lbl.setForeground(COLOR_DORADO);
-
-        JSeparator der = new JSeparator();
-        der.setForeground(COLOR_DORADO);
-
-        sep.add(izq, BorderLayout.WEST);
-        sep.add(lbl, BorderLayout.CENTER);
-        sep.add(der, BorderLayout.EAST);
-        return sep;
-    }
-
-    // -----------------------------------------------------------------------
-    // Botones de selección de color (Blancas / Negras)
+    // Botones de color: baldosas de piedra con el rey de cada color
     // -----------------------------------------------------------------------
     private JPanel construirBotonesColor() {
         JPanel panel = new JPanel(new GridLayout(1, 2, 20, 0));
-        panel.setBackground(BG_DARK);
-        panel.setMaximumSize(new Dimension(440, 130));
-        panel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.setOpaque(false);
+        fijarTamano(panel, ANCHO_CONTENIDO, 170);
 
-        JButton btnBlancas = crearBotonColor("♔", "Jugar con\nBlancas",
-                BTN_BLANCO, new java.awt.Color(50, 45, 40), BTN_HOVER_BL);
+        BufferedImage baldosa = Tema.cargarImagen("baldosa_blanca.png");
+        JButton btnBlancas = new BotonBaldosa("Blancas", baldosa, Tema.cargarImagen("rey_blanco.png"));
         btnBlancas.addActionListener(e -> iniciarPartida(Color.BLANCO));
-
-        JButton btnNegras = crearBotonColor("♚", "Jugar con\nNegras",
-                BTN_NEGRO, COLOR_DORADO, BTN_HOVER_NG);
+        JButton btnNegras = new BotonBaldosa("Negras", oscurecer(baldosa), Tema.cargarImagen("rey_negro.png"));
         btnNegras.addActionListener(e -> iniciarPartida(Color.NEGRO));
 
         panel.add(btnBlancas);
@@ -352,32 +354,111 @@ public class PantallaMenu extends JFrame {
         return panel;
     }
 
+    /** Versión oscura de la baldosa (piedra negra) para el botón de Negras. */
+    private static BufferedImage oscurecer(BufferedImage img) {
+        if (img == null) return null;
+        BufferedImage argb = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        argb.getGraphics().drawImage(img, 0, 0, null);
+        return new RescaleOp(new float[]{0.30f, 0.32f, 0.38f, 1f}, new float[]{0, 0, 0, 0}, null).filter(argb, null);
+    }
+
+    private static class BotonBaldosa extends JButton {
+        private final BufferedImage baldosa;
+        private final BufferedImage rey;
+        private final String color;
+        private boolean hover;
+        private BufferedImage baldosaEscalada, reyEscalado;
+
+        BotonBaldosa(String color, BufferedImage baldosa, BufferedImage rey) {
+            this.color = color;
+            this.baldosa = baldosa;
+            this.rey = rey;
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setOpaque(false);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            addMouseListener(new MouseAdapter() {
+                @Override public void mouseEntered(MouseEvent e) { hover = true;  repaint(); }
+                @Override public void mouseExited(MouseEvent e)  { hover = false; repaint(); }
+            });
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            Tema.suavizar(g2);
+            int w = getWidth(), h = getHeight();
+            int elevar = hover ? 3 : 0;
+            int alturaCartel = 46;
+            int lado = Math.min(w - 8, h - alturaCartel + 10);
+            int bx = (w - lado) / 2, by = 4 - elevar;
+
+            // Halo al pasar el mouse
+            if (hover) {
+                g2.setPaint(new RadialGradientPaint(w / 2f, by + lado / 2f, lado * 0.75f, new float[]{0f, 1f},
+                        new java.awt.Color[]{new java.awt.Color(240, 210, 140, 90), new java.awt.Color(0, 0, 0, 0)}));
+                g2.fillRect(0, 0, w, h);
+            }
+            if (baldosa != null) {
+                if (baldosaEscalada == null || baldosaEscalada.getWidth() != lado) {
+                    baldosaEscalada = Tema.escalarConCalidad(baldosa, lado, lado, true);
+                }
+                g2.drawImage(baldosaEscalada, bx, by, null);
+            }
+            if (rey != null) {
+                int alto = (int) (lado * 0.78);
+                int ancho = rey.getWidth() * alto / rey.getHeight();
+                if (reyEscalado == null || reyEscalado.getHeight() != alto) {
+                    reyEscalado = Tema.escalarConCalidad(rey, ancho, alto, true);
+                }
+                g2.setColor(new java.awt.Color(0, 0, 0, 80));
+                g2.fill(new Ellipse2D.Double(w / 2.0 - ancho * 0.3, by + lado * 0.86, ancho * 0.6, lado * 0.08));
+                g2.drawImage(reyEscalado, (w - ancho) / 2, by + (lado - alto) / 2 - 4, null);
+            }
+
+            // Cartel con el texto, estilo placa del marco
+            int cy = h - alturaCartel;
+            Shape placa = Tema.octogono(6, cy, w - 12, alturaCartel - 4, 8);
+            g2.setColor(new java.awt.Color(10, 16, 26, 235));
+            g2.fill(placa);
+            g2.setColor(hover ? Tema.DORADO_BRILLO : Tema.DORADO_OSCURO);
+            g2.setStroke(new BasicStroke(hover ? 1.8f : 1.3f));
+            g2.draw(placa);
+            g2.setFont(Tema.tituloEspaciado(10f, 0.25f));
+            FontMetrics fm = g2.getFontMetrics();
+            g2.setColor(Tema.TEXTO_SUAVE);
+            g2.drawString("JUGAR CON", (w - fm.stringWidth("JUGAR CON")) / 2, cy + 16);
+            g2.setFont(Tema.tituloEspaciado(17f, 0.12f));
+            fm = g2.getFontMetrics();
+            String t = color.toUpperCase();
+            g2.setColor(hover ? Tema.DORADO_BRILLO : Tema.TEXTO);
+            g2.drawString(t, (w - fm.stringWidth(t)) / 2, cy + 36);
+            g2.dispose();
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Créditos
     // -----------------------------------------------------------------------
-    private JPanel construirPanelCreditos() {
-        JPanel panel = new JPanel();
-        panel.setBackground(BG_DARK);
-        panel.setBorder(new EmptyBorder(10, 0, 15, 0));
-        JLabel lbl = new JLabel("Proyecto Ajedrez - Ingeniería de Software 2026");
-        lbl.setFont(new Font("Segoe UI", Font.ITALIC, 11));
-        lbl.setForeground(COLOR_SUBTXT);
-        panel.add(lbl);
-        return panel;
+    private JComponent construirPanelCreditos() {
+        JLabel lbl = new JLabel("Proyecto Ajedrez - Ingeniería de Software 2026", SwingConstants.CENTER);
+        lbl.setFont(Tema.titulo(12f).deriveFont(Font.ITALIC));
+        lbl.setForeground(Tema.TEXTO_SUAVE);
+        lbl.setBorder(new EmptyBorder(8, 0, 18, 0));
+        return lbl;
     }
 
     // -----------------------------------------------------------------------
     // Lógica de eventos
     // -----------------------------------------------------------------------
     private void onIniciarSesion() {
-        JTextField campoUsuario = new JTextField(18);
-        JPasswordField campoContrasena = new JPasswordField(18);
-        JPanel form = crearFormulario(
-                new String[]{"Usuario:", "Contraseña:"},
-                new JComponent[]{campoUsuario, campoContrasena});
+        JTextField campoUsuario = Dialogos.campoTexto();
+        JPasswordField campoContrasena = Dialogos.campoContrasena();
 
         while (true) {
-            if (!mostrarFormulario(form, "Iniciar sesión", campoUsuario)) return;
+            if (!Dialogos.formulario(this, "Iniciar sesión", new String[]{"Usuario", "Contraseña"},
+                    new JComponent[]{campoUsuario, campoContrasena}, "Entrar")) return;
 
             String usuario = campoUsuario.getText().trim();
             char[] contrasena = campoContrasena.getPassword();
@@ -413,19 +494,16 @@ public class PantallaMenu extends JFrame {
     }
 
     private PerfilJugador asignarContrasenaCuentaAntigua(String usuario) {
-        JOptionPane.showMessageDialog(this,
+        Dialogos.mensaje(this, "Proteger cuenta",
                 "La cuenta \"" + usuario + "\" se creó antes de que existieran las contraseñas.\n"
-                        + "Elegí una contraseña para protegerla.",
-                "Proteger cuenta", JOptionPane.INFORMATION_MESSAGE);
+                        + "Elegí una contraseña para protegerla.", Dialogos.Tipo.INFO);
 
-        JPasswordField campoNueva = new JPasswordField(18);
-        JPasswordField campoConfirmar = new JPasswordField(18);
-        JPanel form = crearFormulario(
-                new String[]{"Nueva contraseña:", "Repetir contraseña:"},
-                new JComponent[]{campoNueva, campoConfirmar});
+        JPasswordField campoNueva = Dialogos.campoContrasena();
+        JPasswordField campoConfirmar = Dialogos.campoContrasena();
 
         while (true) {
-            if (!mostrarFormulario(form, "Proteger cuenta", campoNueva)) return null;
+            if (!Dialogos.formulario(this, "Proteger cuenta", new String[]{"Nueva contraseña", "Repetir contraseña"},
+                    new JComponent[]{campoNueva, campoConfirmar}, "Guardar")) return null;
 
             char[] nueva = campoNueva.getPassword();
             char[] confirmar = campoConfirmar.getPassword();
@@ -444,15 +522,13 @@ public class PantallaMenu extends JFrame {
     }
 
     private void onRegistrarse() {
-        JTextField campoUsuario = new JTextField(18);
-        JPasswordField campoContrasena = new JPasswordField(18);
-        JPasswordField campoConfirmar = new JPasswordField(18);
-        JPanel form = crearFormulario(
-                new String[]{"Usuario:", "Contraseña:", "Repetir contraseña:"},
-                new JComponent[]{campoUsuario, campoContrasena, campoConfirmar});
+        JTextField campoUsuario = Dialogos.campoTexto();
+        JPasswordField campoContrasena = Dialogos.campoContrasena();
+        JPasswordField campoConfirmar = Dialogos.campoContrasena();
 
         while (true) {
-            if (!mostrarFormulario(form, "Registrarse", campoUsuario)) return;
+            if (!Dialogos.formulario(this, "Registrarse", new String[]{"Usuario", "Contraseña", "Repetir contraseña"},
+                    new JComponent[]{campoUsuario, campoContrasena, campoConfirmar}, "Crear cuenta")) return;
 
             String usuario = campoUsuario.getText().trim();
             char[] contrasena = campoContrasena.getPassword();
@@ -479,14 +555,41 @@ public class PantallaMenu extends JFrame {
                 }
                 perfilSeleccionado = nuevo;
                 actualizarTarjetaPerfil();
-                JOptionPane.showMessageDialog(this,
-                        "Cuenta creada. ¡Bienvenido/a, " + usuario + "!",
-                        "Registro exitoso", JOptionPane.INFORMATION_MESSAGE);
+                Dialogos.mensaje(this, "Registro exitoso",
+                        "Cuenta creada. ¡Bienvenido/a, " + usuario + "!", Dialogos.Tipo.INFO);
                 return;
             } finally {
                 Arrays.fill(contrasena, '\0');
                 Arrays.fill(confirmar, '\0');
             }
+        }
+    }
+
+    /** Elegir, cambiar o quitar la foto de perfil. */
+    private void onCambiarFoto() {
+        if (perfilSeleccionado.getFoto() != null) {
+            int op = Dialogos.opciones(this, "Foto de perfil", "¿Qué querés hacer con tu foto de perfil?",
+                    Dialogos.Tipo.PREGUNTA, "Cancelar", "Quitar foto", "Elegir otra");
+            if (op == 1) {
+                cuentas.cambiarFoto(perfilSeleccionado, null);
+                actualizarTarjetaPerfil();
+            }
+            if (op != 2) return;
+        }
+
+        // Selector de archivos nativo del sistema (el explorador de Windows)
+        FileDialog selector = new FileDialog(this, "Elegir foto de perfil", FileDialog.LOAD);
+        selector.setFile("*.png;*.jpg;*.jpeg;*.gif;*.bmp");
+        selector.setFilenameFilter((dir, nombre) -> nombre.toLowerCase().matches(".*\\.(png|jpe?g|gif|bmp)"));
+        selector.setVisible(true);
+        if (selector.getFile() == null) return;
+
+        try {
+            byte[] foto = AvatarJugador.prepararFoto(new File(selector.getDirectory(), selector.getFile()));
+            cuentas.cambiarFoto(perfilSeleccionado, foto);
+            actualizarTarjetaPerfil();
+        } catch (IOException | IllegalArgumentException e) {
+            mostrarError("No se pudo usar esa imagen.\n" + e.getMessage());
         }
     }
 
@@ -506,63 +609,41 @@ public class PantallaMenu extends JFrame {
         return null;
     }
 
-    private JPanel crearFormulario(String[] etiquetas, JComponent[] campos) {
-        JPanel form = new JPanel(new GridBagLayout());
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(4, 4, 4, 4);
-        c.anchor = GridBagConstraints.WEST;
-        for (int i = 0; i < etiquetas.length; i++) {
-            c.gridy = i;
-            c.gridx = 0;
-            form.add(new JLabel(etiquetas[i]), c);
-            c.gridx = 1;
-            form.add(campos[i], c);
-        }
-        return form;
-    }
-
-    /** Muestra el formulario; devuelve true si el usuario aceptó. */
-    private boolean mostrarFormulario(JPanel form, String titulo, JComponent foco) {
-        SwingUtilities.invokeLater(foco::requestFocusInWindow);
-        int resp = JOptionPane.showConfirmDialog(this, form, titulo,
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-        return resp == JOptionPane.OK_OPTION;
-    }
-
     private void mostrarError(String mensaje) {
-        JOptionPane.showMessageDialog(this, mensaje, "Error", JOptionPane.ERROR_MESSAGE);
+        Dialogos.mensaje(this, "Error", mensaje, Dialogos.Tipo.ERROR);
     }
 
     private void actualizarTarjetaPerfil() {
         boolean logueado = perfilSeleccionado != null;
         btnIniciarSesion.setVisible(!logueado);
         btnRegistrarse.setVisible(!logueado);
+        btnCambiarFoto.setVisible(logueado);
         btnCerrarSesion.setVisible(logueado);
+        avatar.setCursor(logueado ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+        avatar.setToolTipText(logueado ? "Cambiar foto de perfil" : null);
 
         if (!logueado) {
-            lblPerfilActual.setText("Sin sesión iniciada");
-            lblNivelActual.setText("Iniciá sesión o registrate para guardar tu progreso");
-            barraExp.setValue(0);
-            barraExp.setString("0 / 0 XP");
+            lblPerfilActual.setText("Invitado");
+            lblNivelActual.setText("Iniciá sesión para guardar tu progreso");
+            avatar.setDatos(null, null);
+            barraExp.setValor(0);
+            barraExp.setTexto("0 / 0 XP");
             return;
         }
         lblPerfilActual.setText(perfilSeleccionado.getNombre());
-        lblNivelActual.setText("Nivel " + perfilSeleccionado.getNivel()
-                + "  •  " + perfilSeleccionado.getPuntosAcumulados() + " pts totales"
-                + "  •  " + perfilSeleccionado.getPartidasGanadas() + " victorias");
-
-        int progreso = (int) (perfilSeleccionado.getProgresoBarra() * 100);
-        barraExp.setValue(progreso);
-        barraExp.setString(perfilSeleccionado.getPuntosEnNivelActual()
+        lblNivelActual.setText(perfilSeleccionado.getPuntosAcumulados() + " pts  •  "
+                + perfilSeleccionado.getPartidasGanadas() + " victorias");
+        avatar.setDatos(perfilSeleccionado.getFoto(), perfilSeleccionado.getNivel());
+        barraExp.setValor((int) (perfilSeleccionado.getProgresoBarra() * 100));
+        barraExp.setTexto(perfilSeleccionado.getPuntosEnNivelActual()
                 + " / " + perfilSeleccionado.getPuntosParaSiguienteNivel() + " XP");
     }
 
     private void iniciarPartida(Color colorJugador) {
         if (perfilSeleccionado == null) {
-            int resp = JOptionPane.showConfirmDialog(this,
+            if (!Dialogos.confirmar(this, "Sin sesión",
                     "No iniciaste sesión.\n¿Querés jugar como invitado (sin guardar progreso)?",
-                    "Sin sesión", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-            if (resp != JOptionPane.YES_OPTION) return;
+                    Dialogos.Tipo.ADVERTENCIA, "Jugar", "Cancelar")) return;
         }
 
         if (!contraIA) {
@@ -571,7 +652,7 @@ public class PantallaMenu extends JFrame {
         }
 
         // El motor de IA tarda un momento en arrancar (lanza Python): se inicia en segundo plano
-        Dificultad dificultad = (Dificultad) comboDificultad.getSelectedItem();
+        Dificultad dificultad = dificultadElegida;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         getContentPane().setEnabled(false);
         new SwingWorker<MotorAjedrez, Void>() {
@@ -589,16 +670,14 @@ public class PantallaMenu extends JFrame {
                     if (!motor.estaDisponible()) {
                         String motivo = motor.motivoNoDisponible();
                         motor.cerrar();
-                        JOptionPane.showMessageDialog(PantallaMenu.this,
-                                "No se pudo iniciar la IA.\n" + motivo,
-                                "IA no disponible", JOptionPane.ERROR_MESSAGE);
+                        Dialogos.mensaje(PantallaMenu.this, "IA no disponible",
+                                "No se pudo iniciar la IA.\n" + motivo, Dialogos.Tipo.ERROR);
                         return;
                     }
                     abrirPartida(colorJugador, motor, dificultad);
                 } catch (Exception e) {
-                    JOptionPane.showMessageDialog(PantallaMenu.this,
-                            "No se pudo iniciar la IA.\n" + e.getMessage(),
-                            "IA no disponible", JOptionPane.ERROR_MESSAGE);
+                    Dialogos.mensaje(PantallaMenu.this, "IA no disponible",
+                            "No se pudo iniciar la IA.\n" + e.getMessage(), Dialogos.Tipo.ERROR);
                 }
             }
         }.execute();
@@ -622,67 +701,6 @@ public class PantallaMenu extends JFrame {
     }
 
     // -----------------------------------------------------------------------
-    // Utilidades de creación de componentes estilizados
-    // -----------------------------------------------------------------------
-    private JButton crearBotonColor(String simbolo, String texto,
-                                     java.awt.Color bgColor, java.awt.Color fgColor,
-                                     java.awt.Color hoverColor) {
-        JButton btn = new JButton() {
-            @Override
-            protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(getBackground());
-                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 12, 12);
-
-                // Símbolo
-                g2.setFont(new Font(FUENTE_AJEDREZ, Font.PLAIN, 36));
-                g2.setColor(fgColor);
-                FontMetrics fm = g2.getFontMetrics();
-                int sx = (getWidth() - fm.stringWidth(simbolo)) / 2;
-                g2.drawString(simbolo, sx, 48);
-
-                // Texto multiline
-                g2.setFont(new Font("Segoe UI", Font.BOLD, 13));
-                g2.setColor(fgColor);
-                String[] lineas = texto.split("\n");
-                FontMetrics fm2 = g2.getFontMetrics();
-                int y = 70;
-                for (String linea : lineas) {
-                    int lx = (getWidth() - fm2.stringWidth(linea)) / 2;
-                    g2.drawString(linea, lx, y);
-                    y += fm2.getHeight();
-                }
-                g2.dispose();
-            }
-        };
-        btn.setPreferredSize(new Dimension(200, 110));
-        btn.setBackground(bgColor);
-        btn.setBorderPainted(false);
-        btn.setFocusPainted(false);
-        btn.setContentAreaFilled(false);
-        btn.setOpaque(false);
-        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        btn.addMouseListener(new MouseAdapter() {
-            @Override public void mouseEntered(MouseEvent e) { btn.setBackground(hoverColor); btn.repaint(); }
-            @Override public void mouseExited(MouseEvent e)  { btn.setBackground(bgColor);    btn.repaint(); }
-        });
-        return btn;
-    }
-
-    private JButton crearBotonSecundario(String texto) {
-        JButton btn = new JButton(texto);
-        btn.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        btn.setForeground(COLOR_DORADO);
-        btn.setBackground(new java.awt.Color(60, 58, 55));
-        btn.setBorderPainted(false);
-        btn.setFocusPainted(false);
-        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        btn.setBorder(new EmptyBorder(5, 10, 5, 10));
-        return btn;
-    }
-
-    // -----------------------------------------------------------------------
     // Ícono programático: rey de ajedrez dorado sobre fondo oscuro
     // -----------------------------------------------------------------------
     public static Image crearIconoAjedrez() {
@@ -696,24 +714,21 @@ public class PantallaMenu extends JFrame {
 
         // Si no hay archivo, generamos un ícono programático
         int size = 64;
-        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
-                size, size, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2 = img.createGraphics();
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        Tema.suavizar(g2);
 
-        // Fondo circular oscuro
-        g2.setColor(new java.awt.Color(40, 38, 35));
+        // Fondo circular azul noche
+        g2.setColor(Tema.FONDO_OSCURO);
         g2.fillOval(2, 2, size - 4, size - 4);
 
         // Borde dorado
-        g2.setColor(COLOR_DORADO);
+        g2.setColor(Tema.DORADO);
         g2.setStroke(new BasicStroke(2.5f));
         g2.drawOval(2, 2, size - 4, size - 4);
 
         // Símbolo del rey
         g2.setFont(new Font(FUENTE_AJEDREZ, Font.PLAIN, 42));
-        g2.setColor(COLOR_DORADO);
         FontMetrics fm = g2.getFontMetrics();
         String sym = "♔";
         int x = (size - fm.stringWidth(sym)) / 2;

@@ -45,6 +45,9 @@ public class PerfilJugador implements Serializable {
     // La contraseña nunca se guarda en texto plano: solo la sal y el hash derivado
     private byte[] salContrasena;
     private byte[] hashContrasena;
+    // Foto de perfil ya procesada por la interfaz (imagen codificada, ej. PNG); null si no tiene
+    private byte[] foto;
+    public static final int TAMANO_MAXIMO_FOTO = 1024 * 1024;
     private long puntosAcumulados;
     private int nivel;
     private int puntosEnNivelActual;   // puntos acumulados dentro del nivel actual
@@ -171,6 +174,19 @@ public class PerfilJugador implements Serializable {
     public boolean registrarJaque() {
         jaquesDados++;
         return agregarPuntos(PUNTOS_JAQUE);
+    }
+
+    // --- Foto de perfil ---
+    public byte[] getFoto() {
+        return foto != null ? foto.clone() : null;
+    }
+
+    /** Asigna (o quita, con null) la foto de perfil. */
+    public void setFoto(byte[] foto) {
+        if (foto != null && foto.length > TAMANO_MAXIMO_FOTO) {
+            throw new IllegalArgumentException("La foto de perfil supera el tamaño máximo permitido");
+        }
+        this.foto = foto != null ? foto.clone() : null;
     }
 
     // --- Getters ---

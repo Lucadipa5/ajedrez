@@ -54,6 +54,7 @@ public class TestRunner {
         testNotacionFENPosicionInicial();
         testJugadaDesdeUCI();
         testServicioCuentas();
+        testFotoDePerfil();
         testXPSoloParaElColorDelJugador();
         testDeshacerContraIADeshaceAmbasJugadas();
 
@@ -333,6 +334,24 @@ public class TestRunner {
         afirmar(cuentas.registrar("ANA", "otra".toCharArray()) == null, "No se puede registrar un usuario repetido");
         afirmar(cuentas.iniciarSesion("ana", "clave".toCharArray()) != null, "Inicio de sesión con contraseña correcta");
         afirmar(cuentas.iniciarSesion("ana", "mala".toCharArray()) == null, "Inicio de sesión rechaza contraseña incorrecta");
+    }
+
+    private static void testFotoDePerfil() {
+        ServicioCuentas cuentas = new ServicioCuentas(new RepositorioEnMemoria());
+        PerfilJugador perfil = cuentas.registrar("lucia", "1234".toCharArray());
+        byte[] foto = {1, 2, 3, 4};
+        cuentas.cambiarFoto(perfil, foto);
+        PerfilJugador recargado = cuentas.iniciarSesion("lucia", "1234".toCharArray());
+        afirmar(java.util.Arrays.equals(recargado.getFoto(), foto), "La foto de perfil se guarda con la cuenta");
+        cuentas.cambiarFoto(recargado, null);
+        afirmar(cuentas.iniciarSesion("lucia", "1234".toCharArray()).getFoto() == null, "La foto de perfil se puede quitar");
+        boolean rechazada = false;
+        try {
+            perfil.setFoto(new byte[PerfilJugador.TAMANO_MAXIMO_FOTO + 1]);
+        } catch (IllegalArgumentException e) {
+            rechazada = true;
+        }
+        afirmar(rechazada, "Una foto demasiado grande se rechaza");
     }
 
     private static void testXPSoloParaElColorDelJugador() {

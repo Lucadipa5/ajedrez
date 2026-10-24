@@ -88,6 +88,14 @@ public class ServicioCuentas {
     }
 
     /**
+     * Cambia (o quita, con null) la foto de perfil y la guarda.
+     */
+    public void cambiarFoto(PerfilJugador perfil, byte[] foto) {
+        perfil.setFoto(foto);
+        guardar(perfil);
+    }
+
+    /**
      * Guarda el progreso del perfil, reemplazando la versión anterior.
      */
     public void guardar(PerfilJugador perfil) {

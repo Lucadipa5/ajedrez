@@ -2,18 +2,18 @@ package ajedrez.adaptadores.ui.swing;
 
 import ajedrez.nucleo.dominio.Posicion;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -25,6 +25,11 @@ import java.util.function.Consumer;
  *
  * Baldosas: claras → blanca; oscuras de la mitad de abajo → azul; oscuras de la mitad de arriba → roja.
  * La mitad se toma según la pantalla (no según el color), así el lado del jugador siempre es azul.
+ *
+ * Rendimiento: el dibujo se separa en dos capas guardadas en memoria (fondo con resaltados fijos,
+ * y piezas) que solo se regeneran cuando cambia la partida o el tamaño. En cada cuadro de animación
+ * se copian esas capas y se dibuja únicamente lo que se mueve (marcas, mouse, brillo del jaque),
+ * y se redibuja solo la zona de la pantalla que cambió.
  */
 class VistaTablero extends JComponent {
 
@@ -43,13 +48,13 @@ class VistaTablero extends JComponent {
             new Homografia(ESQ_SUP_IZQ, ESQ_SUP_DER, ESQ_INF_DER, ESQ_INF_IZQ);
 
     static {
-        BufferedImage fondo = cargar("tablero_fondo.jpg");
+        BufferedImage fondo = Tema.cargarImagen("tablero_fondo.jpg");
         FONDO_COMPUESTO = fondo != null
-                ? componerTablero(fondo, cargar("baldosa_blanca.png"), cargar("baldosa_azul.png"), cargar("baldosa_roja.png"))
+                ? componerTablero(fondo, Tema.cargarImagen("baldosa_blanca.png"),
+                        Tema.cargarImagen("baldosa_azul.png"), Tema.cargarImagen("baldosa_roja.png"))
                 : null;
     }
 
-    private static final java.awt.Color BG = new java.awt.Color(35, 32, 28);
     private static final java.awt.Color COLOR_SELECCION = new java.awt.Color(250, 230, 60, 120);
     private static final java.awt.Color COLOR_BORDE_SELECCION = new java.awt.Color(250, 220, 50, 230);
     private static final java.awt.Color COLOR_ULTIMA_JUGADA = new java.awt.Color(240, 220, 90, 95);
@@ -60,7 +65,8 @@ class VistaTablero extends JComponent {
     private static final java.awt.Color COLOR_HOVER_CAPTURA = new java.awt.Color(230, 70, 50, 70);
 
     // -----------------------------------------------------------------------
-    // Estado que la ventana actualiza (indexado por posición lógica [fila][columna])
+    // Estado que la ventana actualiza (indexado por posición lógica [fila][columna]).
+    // Después de cambiarlo hay que llamar a invalidar().
     // -----------------------------------------------------------------------
     final BufferedImage[][] imagenPieza = new BufferedImage[8][8];
     final String[][] simboloPieza = new String[8][8];            // si falta la imagen
@@ -71,6 +77,7 @@ class VistaTablero extends JComponent {
     Posicion seleccionada;
     Posicion reyEnJaque;
     boolean esMate;
+    // Valores animados: cambiarlos solo requiere repintar (no invalidar)
     float pulso = 1f;
     float escalaMarca = 1f;
     int desplazamientoX = 0;
@@ -82,8 +89,15 @@ class VistaTablero extends JComponent {
     // Escala y desplazamiento actuales de la imagen dentro del componente
     private double escala = 1;
     private double origenX, origenY;
-    private BufferedImage fondoEscalado;
     private Dimension tamanoCache;
+    private BufferedImage fondoEscalado;
+
+    // Capas pre-dibujadas (en píxeles reales de pantalla, por si Windows tiene escalado)
+    private BufferedImage capaFondo;
+    private BufferedImage capaPiezas;
+    private double escalaPantallaCapas;
+    private boolean capasSucias = true;
+    private final Map<String, BufferedImage> piezasEscaladas = new HashMap<>();
 
     VistaTablero(boolean invertido) {
         this.invertido = invertido;
@@ -104,11 +118,36 @@ class VistaTablero extends JComponent {
         this.alClickear = accion;
     }
 
+    /** Cambió la partida (piezas, selección, última jugada...): hay que regenerar las capas. */
+    void invalidar() {
+        capasSucias = true;
+        repaint();
+    }
+
+    /** Repinta solo la zona de una casilla (para animaciones que afectan a una sola). */
+    void repintarCasilla(Posicion pos) {
+        if (pos == null) return;
+        recalcularEscala();
+        Rectangle r = formaCasilla(pos).getBounds();
+        r.grow(4 + Math.abs(desplazamientoX), 4);
+        r.translate(desplazamientoX, 0);
+        repaint(r);
+    }
+
+    /** Repinta las casillas marcadas como destino (animación de aparición de las marcas). */
+    void repintarDestinos() {
+        for (int f = 0; f < 8; f++)
+            for (int c = 0; c < 8; c++)
+                if (destino[f][c]) repintarCasilla(new Posicion(f, c));
+    }
+
     private void actualizarHover(Posicion p) {
         if (p == null ? hover == null : p.equals(hover)) return;
+        Posicion anterior = hover;
         hover = p;
         setCursor(p != null ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
-        repaint();
+        repintarCasilla(anterior);
+        repintarCasilla(p);
     }
 
     // -----------------------------------------------------------------------
@@ -119,22 +158,20 @@ class VistaTablero extends JComponent {
 
     private void recalcularEscala() {
         Dimension d = getSize();
-        if (d.equals(tamanoCache) && fondoEscalado != null) return;
+        if (d.equals(tamanoCache)) return;
         tamanoCache = d;
         escala = Math.min(d.width / (double) REGION_MARCO.width, d.height / (double) REGION_MARCO.height);
-        origenX = d.width / 2.0 - (REGION_MARCO.getCenterX()) * escala;
-        origenY = d.height / 2.0 - (REGION_MARCO.getCenterY()) * escala;
-        if (FONDO_COMPUESTO != null) {
-            int w = Math.max(1, (int) Math.round(FONDO_COMPUESTO.getWidth() * escala));
-            int h = Math.max(1, (int) Math.round(FONDO_COMPUESTO.getHeight() * escala));
-            fondoEscalado = escalarConCalidad(FONDO_COMPUESTO, w, h);
-        }
+        origenX = d.width / 2.0 - REGION_MARCO.getCenterX() * escala;
+        origenY = d.height / 2.0 - REGION_MARCO.getCenterY() * escala;
+        fondoEscalado = null;
+        piezasEscaladas.clear();
+        capasSucias = true;
     }
 
-    /** Punto de pantalla para la coordenada (u, v) del tablero, con u, v entre 0 y 8. */
+    /** Punto de pantalla (sin la sacudida) para la coordenada del tablero (columna, fila) entre 0 y 8. */
     private Point2D.Double aPantalla(double colU, double filaV) {
         Point2D.Double p = PERSPECTIVA.aplicar(colU / 8.0, filaV / 8.0);
-        return new Point2D.Double(origenX + desplazamientoX + p.x * escala, origenY + p.y * escala);
+        return new Point2D.Double(origenX + p.x * escala, origenY + p.y * escala);
     }
 
     private Shape formaCasilla(Posicion pos) {
@@ -164,7 +201,7 @@ class VistaTablero extends JComponent {
 
     private Posicion casillaEn(Point punto) {
         recalcularEscala();
-        double x = (punto.x - origenX - desplazamientoX) / escala;
+        double x = (punto.x - desplazamientoX - origenX) / escala;
         double y = (punto.y - origenY) / escala;
         Point2D.Double uv = PERSPECTIVA.invertir(x, y);
         if (uv.x < 0 || uv.x >= 1 || uv.y < 0 || uv.y >= 1) return null;
@@ -173,93 +210,159 @@ class VistaTablero extends JComponent {
     }
 
     // -----------------------------------------------------------------------
-    // Dibujo
+    // Dibujo por cuadro: copiar capas + dibujar lo animado
     // -----------------------------------------------------------------------
     @Override
     protected void paintComponent(Graphics g) {
         recalcularEscala();
         Graphics2D g2 = (Graphics2D) g.create();
-        g2.setColor(BG);
-        g2.fillRect(0, 0, getWidth(), getHeight());
-        if (fondoEscalado != null) {
-            g2.drawImage(fondoEscalado, (int) Math.round(origenX) + desplazamientoX, (int) Math.round(origenY), null);
+        double escalaPantalla = g2.getTransform().getScaleX();
+        if (capasSucias || capaFondo == null || escalaPantalla != escalaPantallaCapas) {
+            regenerarCapas(escalaPantalla);
         }
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        int w = getWidth(), h = getHeight();
 
-        // Primero los resaltados de cada casilla, después las piezas (de atrás hacia adelante)
-        for (int f = 0; f < 8; f++)
-            for (int c = 0; c < 8; c++)
-                dibujarResaltados(g2, new Posicion(f, c));
-        dibujarCoordenadas(g2);
-        for (int filaV = 0; filaV < 8; filaV++) {
-            for (int colV = 0; colV < 8; colV++) {
-                int f = invertido ? 7 - filaV : filaV, c = invertido ? 7 - colV : colV;
-                dibujarPieza(g2, new Posicion(f, c));
-            }
+        if (desplazamientoX != 0) {
+            g2.setColor(Tema.FONDO_OSCURO);
+            g2.fillRect(0, 0, w, h);
+            g2.translate(desplazamientoX, 0);
         }
+        g2.drawImage(capaFondo, 0, 0, w, h, null);
+
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        dibujarAnimados(g2);
+
+        g2.drawImage(capaPiezas, 0, 0, w, h, null);
         g2.dispose();
     }
 
-    private void dibujarResaltados(Graphics2D g2, Posicion pos) {
-        int f = pos.getFila(), c = pos.getColumna();
-        Shape forma = formaCasilla(pos);
-        Rectangle2D caja = forma.getBounds2D();
-        double cx = caja.getCenterX(), cy = caja.getCenterY();
-        double ancho = caja.getWidth(), alto = caja.getHeight();
-        boolean esHover = pos.equals(hover);
-
-        if (ultimaJugada[f][c]) {
-            g2.setColor(COLOR_ULTIMA_JUGADA);
-            g2.fill(forma);
-        }
-        if (pos.equals(seleccionada)) {
-            g2.setColor(COLOR_SELECCION);
-            g2.fill(forma);
-            g2.setColor(COLOR_BORDE_SELECCION);
-            g2.setStroke(new BasicStroke(2.5f));
-            g2.draw(forma);
-        }
-
-        // Rey en jaque: brillo rojo radial que late (fijo e intenso si es mate)
-        if (pos.equals(reyEnJaque)) {
-            float intensidad = esMate ? 1f : 0.55f + 0.45f * pulso;
-            int a = Math.round(235 * intensidad);
-            Shape clipAnterior = g2.getClip();
-            g2.clip(forma);
-            g2.setPaint(new RadialGradientPaint(new Point2D.Double(cx, cy), (float) (Math.max(ancho, alto) * 0.72),
-                    new float[]{0f, 0.45f, 1f},
-                    new java.awt.Color[]{
-                            new java.awt.Color(255, 40, 30, a),
-                            new java.awt.Color(230, 30, 20, Math.round(a * 0.65f)),
-                            new java.awt.Color(200, 0, 0, 0)}));
-            g2.fill(forma);
-            g2.setClip(clipAnterior);
-            g2.setColor(new java.awt.Color(220, 25, 15, Math.round(220 * intensidad)));
-            g2.setStroke(new BasicStroke(3f));
-            g2.draw(forma);
-        }
-
-        if (destino[f][c] && esHover) {
-            g2.setColor(captura[f][c] ? COLOR_HOVER_CAPTURA : COLOR_HOVER_DESTINO);
-            g2.fill(forma);
-        }
-        // Marcas de movimiento posible (elipses: acompañan la perspectiva de la casilla)
-        if (destino[f][c] && !(esHover && !captura[f][c])) {
-            if (!captura[f][c]) {
-                double rx = ancho * 0.16 * escalaMarca, ry = alto * 0.16 * escalaMarca;
-                g2.setColor(COLOR_MARCA);
-                g2.fill(new Ellipse2D.Double(cx - rx, cy - ry, rx * 2, ry * 2));
-            } else {
-                double grosor = Math.min(ancho, alto) * 0.085;
-                double factor = 0.7 + 0.3 * escalaMarca;
-                double rx = (ancho / 2 - grosor / 2 - 1) * factor, ry = (alto / 2 - grosor / 2 - 1) * factor;
-                g2.setColor(esHover ? COLOR_MARCA_CAPTURA_HOVER : COLOR_MARCA_CAPTURA);
-                g2.setStroke(new BasicStroke((float) grosor));
-                g2.draw(new Ellipse2D.Double(cx - rx, cy - ry, rx * 2, ry * 2));
+    /** Lo que cambia cuadro a cuadro: brillo del jaque, mouse sobre un destino y marcas. */
+    private void dibujarAnimados(Graphics2D g2) {
+        if (reyEnJaque != null) dibujarBrilloJaque(g2, reyEnJaque);
+        for (int f = 0; f < 8; f++) {
+            for (int c = 0; c < 8; c++) {
+                if (!destino[f][c]) continue;
+                Posicion pos = new Posicion(f, c);
+                Shape forma = formaCasilla(pos);
+                Rectangle2D caja = forma.getBounds2D();
+                double cx = caja.getCenterX(), cy = caja.getCenterY();
+                boolean esHover = pos.equals(hover);
+                boolean esCaptura = captura[f][c];
+                if (esHover) {
+                    g2.setColor(esCaptura ? COLOR_HOVER_CAPTURA : COLOR_HOVER_DESTINO);
+                    g2.fill(forma);
+                    if (!esCaptura) continue;
+                }
+                // Marcas en elipse: acompañan la perspectiva de la casilla
+                if (!esCaptura) {
+                    double rx = caja.getWidth() * 0.16 * escalaMarca, ry = caja.getHeight() * 0.16 * escalaMarca;
+                    g2.setColor(COLOR_MARCA);
+                    g2.fill(new Ellipse2D.Double(cx - rx, cy - ry, rx * 2, ry * 2));
+                } else {
+                    double grosor = Math.min(caja.getWidth(), caja.getHeight()) * 0.085;
+                    double factor = 0.7 + 0.3 * escalaMarca;
+                    double rx = (caja.getWidth() / 2 - grosor / 2 - 1) * factor;
+                    double ry = (caja.getHeight() / 2 - grosor / 2 - 1) * factor;
+                    g2.setColor(esHover ? COLOR_MARCA_CAPTURA_HOVER : COLOR_MARCA_CAPTURA);
+                    g2.setStroke(new BasicStroke((float) grosor));
+                    g2.draw(new Ellipse2D.Double(cx - rx, cy - ry, rx * 2, ry * 2));
+                }
             }
         }
+    }
+
+    /** Brillo rojo radial que late (fijo e intenso si es mate). */
+    private void dibujarBrilloJaque(Graphics2D g2, Posicion pos) {
+        Shape forma = formaCasilla(pos);
+        Rectangle2D caja = forma.getBounds2D();
+        float intensidad = esMate ? 1f : 0.55f + 0.45f * pulso;
+        int a = Math.round(235 * intensidad);
+        g2.setPaint(new RadialGradientPaint(new Point2D.Double(caja.getCenterX(), caja.getCenterY()),
+                (float) (Math.max(caja.getWidth(), caja.getHeight()) * 0.72),
+                new float[]{0f, 0.45f, 1f},
+                new java.awt.Color[]{
+                        new java.awt.Color(255, 40, 30, a),
+                        new java.awt.Color(230, 30, 20, Math.round(a * 0.65f)),
+                        new java.awt.Color(200, 0, 0, 0)}));
+        g2.fill(forma);
+        g2.setColor(new java.awt.Color(220, 25, 15, Math.round(220 * intensidad)));
+        g2.setStroke(new BasicStroke(3f));
+        g2.draw(forma);
+    }
+
+    // -----------------------------------------------------------------------
+    // Capas (se regeneran solo cuando cambia la partida o el tamaño)
+    // -----------------------------------------------------------------------
+    private void regenerarCapas(double escalaPantalla) {
+        int w = Math.max(1, getWidth()), h = Math.max(1, getHeight());
+        int wReal = (int) Math.ceil(w * escalaPantalla), hReal = (int) Math.ceil(h * escalaPantalla);
+        escalaPantallaCapas = escalaPantalla;
+
+        if (fondoEscalado == null && FONDO_COMPUESTO != null) {
+            int fw = Math.max(1, (int) Math.round(FONDO_COMPUESTO.getWidth() * escala * escalaPantalla));
+            int fh = Math.max(1, (int) Math.round(FONDO_COMPUESTO.getHeight() * escala * escalaPantalla));
+            fondoEscalado = Tema.escalarConCalidad(FONDO_COMPUESTO, fw, fh, false);
+        }
+
+        // Capa 1: fondo + tablero + resaltados que no se animan + coordenadas
+        capaFondo = crearCapa(capaFondo, wReal, hReal, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = prepararGraficos(capaFondo, escalaPantalla);
+        g.setColor(Tema.FONDO_OSCURO);
+        g.fillRect(0, 0, w, h);
+        if (fondoEscalado != null) {
+            // El fondo ya está escalado a píxeles reales: se dibuja sin transformación
+            AffineTransform t = g.getTransform();
+            g.setTransform(new AffineTransform());
+            g.drawImage(fondoEscalado, (int) Math.round(origenX * escalaPantalla), (int) Math.round(origenY * escalaPantalla), null);
+            g.setTransform(t);
+        }
+        for (int f = 0; f < 8; f++) {
+            for (int c = 0; c < 8; c++) {
+                Posicion pos = new Posicion(f, c);
+                Shape forma = formaCasilla(pos);
+                if (ultimaJugada[f][c]) {
+                    g.setColor(COLOR_ULTIMA_JUGADA);
+                    g.fill(forma);
+                }
+                if (pos.equals(seleccionada)) {
+                    g.setColor(COLOR_SELECCION);
+                    g.fill(forma);
+                    g.setColor(COLOR_BORDE_SELECCION);
+                    g.setStroke(new BasicStroke(2.5f));
+                    g.draw(forma);
+                }
+            }
+        }
+        dibujarCoordenadas(g);
+        g.dispose();
+
+        // Capa 2: piezas (transparente), de atrás hacia adelante
+        capaPiezas = crearCapa(capaPiezas, wReal, hReal, BufferedImage.TYPE_INT_ARGB);
+        g = prepararGraficos(capaPiezas, escalaPantalla);
+        g.setComposite(AlphaComposite.Clear);
+        g.fillRect(0, 0, w, h);
+        g.setComposite(AlphaComposite.SrcOver);
+        for (int filaV = 0; filaV < 8; filaV++) {
+            for (int colV = 0; colV < 8; colV++) {
+                int f = invertido ? 7 - filaV : filaV, c = invertido ? 7 - colV : colV;
+                dibujarPieza(g, new Posicion(f, c), escalaPantalla);
+            }
+        }
+        g.dispose();
+        capasSucias = false;
+    }
+
+    private static BufferedImage crearCapa(BufferedImage actual, int w, int h, int tipo) {
+        if (actual != null && actual.getWidth() == w && actual.getHeight() == h) return actual;
+        return new BufferedImage(w, h, tipo);
+    }
+
+    private static Graphics2D prepararGraficos(BufferedImage img, double escalaPantalla) {
+        Graphics2D g = img.createGraphics();
+        g.scale(escalaPantalla, escalaPantalla);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        return g;
     }
 
     /** Letras en la fila de abajo y números en la columna izquierda, dentro de las casillas. */
@@ -268,15 +371,13 @@ class VistaTablero extends JComponent {
         g2.setFont(new Font("Segoe UI", Font.BOLD, 1).deriveFont(tam));
         FontMetrics fm = g2.getFontMetrics();
         for (int i = 0; i < 8; i++) {
-            // Columna izquierda (visual): números
             int fila = invertido ? 7 - i : i;
             Point2D.Double p = aPantalla(0.08, i + 0.06);
-            dibujarTextoCoordenada(g2, String.valueOf(8 - fila), p.x, p.y + fm.getAscent(), (i % 2 == 0));
-            // Fila de abajo (visual): letras
+            dibujarTextoCoordenada(g2, String.valueOf(8 - fila), p.x, p.y + fm.getAscent(), i % 2 == 0);
             int col = invertido ? 7 - i : i;
             Point2D.Double q = aPantalla(i + 0.92, 7.94);
             String letra = String.valueOf((char) ('a' + col));
-            dibujarTextoCoordenada(g2, letra, q.x - fm.stringWidth(letra), q.y - fm.getDescent(), ((7 + i) % 2 == 0));
+            dibujarTextoCoordenada(g2, letra, q.x - fm.stringWidth(letra), q.y - fm.getDescent(), (7 + i) % 2 == 0);
         }
     }
 
@@ -285,22 +386,28 @@ class VistaTablero extends JComponent {
         g2.drawString(s, (float) x, (float) y);
     }
 
-    private void dibujarPieza(Graphics2D g2, Posicion pos) {
+    private void dibujarPieza(Graphics2D g2, Posicion pos, double escalaPantalla) {
         int f = pos.getFila(), c = pos.getColumna();
         Rectangle2D caja = formaCasilla(pos).getBounds2D();
         double lado = Math.min(caja.getWidth(), caja.getHeight());
         BufferedImage img = imagenPieza[f][c];
         if (img != null) {
-            double margen = lado * 0.06;
-            double max = lado - margen * 2;
+            double max = lado * 0.88;
             double s = Math.min(max / img.getWidth(), max / img.getHeight());
-            int w = (int) Math.round(img.getWidth() * s), h = (int) Math.round(img.getHeight() * s);
-            int x = (int) Math.round(caja.getCenterX() - w / 2.0);
-            int y = (int) Math.round(caja.getCenterY() - h / 2.0);
+            double w = img.getWidth() * s, h = img.getHeight() * s;
+            double x = caja.getCenterX() - w / 2.0, y = caja.getCenterY() - h / 2.0;
             // Sombra suave debajo de la pieza para que "apoye" sobre la baldosa
             g2.setColor(new java.awt.Color(0, 0, 0, 70));
             g2.fill(new Ellipse2D.Double(caja.getCenterX() - w * 0.3, y + h - h * 0.09, w * 0.6, h * 0.12));
-            g2.drawImage(img, x, y, w, h, null);
+            // La pieza se escala una sola vez por tamaño (con buena calidad) y después solo se copia
+            int wReal = (int) Math.round(w * escalaPantalla), hReal = (int) Math.round(h * escalaPantalla);
+            BufferedImage escalada = piezasEscaladas.computeIfAbsent(
+                    System.identityHashCode(img) + ":" + wReal + "x" + hReal,
+                    k -> Tema.escalarConCalidad(img, wReal, hReal, true));
+            AffineTransform t = g2.getTransform();
+            g2.setTransform(new AffineTransform());
+            g2.drawImage(escalada, (int) Math.round(x * escalaPantalla), (int) Math.round(y * escalaPantalla), null);
+            g2.setTransform(t);
         } else if (simboloPieza[f][c] != null && !simboloPieza[f][c].isEmpty()) {
             String s = simboloPieza[f][c];
             g2.setFont(new Font(PantallaMenu.FUENTE_AJEDREZ, Font.BOLD, Math.max(12, (int) (lado * 0.62))));
@@ -373,25 +480,6 @@ class VistaTablero extends JComponent {
         int g = (int) Math.round(((arriba >> 8) & 255) * a + ((abajo >> 8) & 255) * (1 - a));
         int b = (int) Math.round((arriba & 255) * a + (abajo & 255) * (1 - a));
         return 0xFF000000 | (r << 16) | (g << 8) | b;
-    }
-
-    private static BufferedImage escalarConCalidad(BufferedImage img, int w, int h) {
-        BufferedImage salida = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = salida.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g.drawImage(img, 0, 0, w, h, null);
-        g.dispose();
-        return salida;
-    }
-
-    private static BufferedImage cargar(String nombre) {
-        try (InputStream is = VistaTablero.class.getResourceAsStream("recursos/" + nombre)) {
-            return is != null ? ImageIO.read(is) : null;
-        } catch (IOException e) {
-            System.err.println("No se pudo cargar imagen: " + nombre);
-            return null;
-        }
     }
 
     // -----------------------------------------------------------------------

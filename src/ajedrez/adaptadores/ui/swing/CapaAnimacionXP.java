@@ -36,6 +36,15 @@ class CapaAnimacionXP extends JComponent {
             this.tamano = tamano;
             this.color = color;
         }
+
+        /** Zona que ocupa el texto durante toda su animación (subida + "pop" incluidos). */
+        Rectangle zona() {
+            int largo = Math.max(texto.length(), detalle != null ? detalle.length() : 0);
+            int ancho = Math.round(largo * tamano * 0.8f) + 40;
+            int arriba = Math.round(SUBIDA_PX + tamano * 1.6f);
+            int abajo = Math.round(tamano * 2.4f) + 10;
+            return new Rectangle(centro.x - ancho / 2, centro.y - arriba, ancho, arriba + abajo);
+        }
     }
 
     private final List<TextoFlotante> textos = new ArrayList<>();
@@ -60,14 +69,20 @@ class CapaAnimacionXP extends JComponent {
         if (!timer.isRunning()) timer.start();
     }
 
+    /**
+     * Avanza un cuadro. Solo se repinta la zona de cada texto: repintar toda la capa obligaría
+     * a redibujar la ventana entera 60 veces por segundo (muy lento en pantalla completa).
+     */
     private void avanzar() {
         long ahora = System.currentTimeMillis();
+        for (TextoFlotante t : textos) {
+            repaint(t.zona());
+        }
         textos.removeIf(t -> ahora - t.inicio > DURACION_MS);
         if (textos.isEmpty()) {
             timer.stop();
             setVisible(false);
         }
-        repaint();
     }
 
     @Override
