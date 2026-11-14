@@ -27,15 +27,10 @@ public class MovimientoCaballo implements EstrategiaMovimiento {
 
         for (int[] salto : SALTOS) {
             Posicion destino = origen.desplazar(salto[0], salto[1]);
-            if (destino.esValida()) {
-                if (!tablero.estaOcupada(destino)) {
-                    destinos.add(destino);
-                } else {
-                    Pieza piezaEnDestino = tablero.obtenerPieza(destino);
-                    if (piezaEnDestino.getColor() != piezaOrigen.getColor()) {
-                        destinos.add(destino);
-                    }
-                }
+            if (!tablero.esCasillaValida(destino)) continue;
+            Pieza piezaEnDestino = tablero.obtenerPieza(destino);
+            if (piezaEnDestino == null || !piezaEnDestino.esDelMismoBando(piezaOrigen)) {
+                destinos.add(destino);
             }
         }
         return destinos;

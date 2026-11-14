@@ -5,11 +5,19 @@ import ajedrez.nucleo.dominio.Jugada;
 import ajedrez.nucleo.tablero.Tablero;
 
 /**
- * Puerto de Salida (Driven Port) para un motor de inteligencia artificial de ajedrez.
+ * Puerto de salida (driven port) para un motor de inteligencia artificial de ajedrez.
  * El núcleo solo pide "elegí una jugada para esta posición"; quién la calcula
- * (un script de Python, un motor externo, etc.) lo decide el adaptador.
+ * (un script de Python, un motor externo, un azar) lo decide el adaptador.
+ *
+ * La IA asesora, no arbitra: lo que devuelva se valida contra las jugadas legales
+ * antes de llegar al tablero ({@code SesionDePartida#calcularJugadaIA}).
  */
 public interface MotorAjedrez {
+
+    /** Nombre para el registro de decisiones. */
+    default String getNombre() {
+        return getClass().getSimpleName();
+    }
 
     /** Indica si el motor puede usarse (por ejemplo, si están instaladas sus dependencias). */
     boolean estaDisponible();

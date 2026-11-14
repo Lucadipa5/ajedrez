@@ -1,5 +1,6 @@
 package ajedrez.nucleo.comandos;
 
+import ajedrez.nucleo.dominio.Jugada;
 import ajedrez.nucleo.dominio.Pieza;
 import ajedrez.nucleo.dominio.Posicion;
 import ajedrez.nucleo.dominio.TipoPieza;
@@ -13,7 +14,7 @@ import ajedrez.nucleo.tablero.Tablero;
  * Implementa el patrón Command permitiendo la reversibilidad exacta del estado del tablero,
  * garantizando que al deshacer una coronación, la pieza vuelva a ser el Peón original.
  */
-public class MoverPiezaComando implements Comando {
+public class MoverPiezaComando implements ComandoDeJugada {
     private final Tablero tablero;
     private final Posicion origen;
     private final Posicion destino;
@@ -79,6 +80,11 @@ public class MoverPiezaComando implements Comando {
         }
     }
 
+    @Override
+    public Jugada getJugada() {
+        return new Jugada(origen, destino, fuePromocionada ? tipoPromocion : null);
+    }
+
     public Posicion getOrigen() {
         return origen;
     }
@@ -87,12 +93,19 @@ public class MoverPiezaComando implements Comando {
         return destino;
     }
 
+    @Override
     public Pieza getPiezaMovida() {
         return piezaMovidaOriginal;
     }
 
+    @Override
     public Pieza getPiezaCapturada() {
         return piezaCapturada;
+    }
+
+    @Override
+    public TipoPieza getPromocion() {
+        return fuePromocionada ? tipoPromocion : null;
     }
 
     public boolean fuePromocionada() {

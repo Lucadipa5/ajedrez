@@ -24,13 +24,8 @@ public class EstadoJaqueMate implements EstadoPartida {
 
     @Override
     public EstadoPartida turnoAnterior() {
-        // Al deshacer, vuelve al turno del bando perdedor que había recibido mate
-        return ganador == Color.BLANCO ? new EstadoTurnoNegro() : new EstadoTurnoBlanco();
-    }
-
-    @Override
-    public String getDescripcion() {
-        return "¡JAQUE MATE! Ganaron las " + (ganador == Color.BLANCO ? "Blancas" : "Negras");
+        // Al deshacer la jugada de mate vuelve a mover quien la dio
+        return EstadoPartida.turnoDe(ganador);
     }
 
     @Override

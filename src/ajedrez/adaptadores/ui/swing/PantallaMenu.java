@@ -1,12 +1,11 @@
 package ajedrez.adaptadores.ui.swing;
 
-import ajedrez.adaptadores.ia.MotorPython;
 import ajedrez.nucleo.dominio.Color;
+import ajedrez.nucleo.ia.ConfiguracionIA;
 import ajedrez.nucleo.ia.Dificultad;
 import ajedrez.nucleo.ia.MotorAjedrez;
 import ajedrez.nucleo.perfil.PerfilJugador;
 import ajedrez.nucleo.perfil.ServicioCuentas;
-import ajedrez.nucleo.servicio.PartidaAjedrez;
 import ajedrez.nucleo.servicio.SesionDePartida;
 
 import javax.swing.*;
@@ -85,8 +84,11 @@ public class PantallaMenu extends JFrame {
     private JLabel lblDificultad;
     private final Map<Dificultad, BotonTematico> botonesDificultad = new EnumMap<>(Dificultad.class);
 
-    public PantallaMenu(ServicioCuentas cuentas) {
-        this.cuentas = cuentas;
+    private final ServiciosDelJuego servicios;
+
+    public PantallaMenu(ServiciosDelJuego servicios) {
+        this.servicios = servicios;
+        this.cuentas = servicios.cuentas();
         setTitle("Ajedrez — Menú Principal");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
@@ -658,7 +660,7 @@ public class PantallaMenu extends JFrame {
         new SwingWorker<MotorAjedrez, Void>() {
             @Override
             protected MotorAjedrez doInBackground() {
-                return new MotorPython();
+                return servicios.fabricaMotorIA().get();
             }
 
             @Override
@@ -684,9 +686,10 @@ public class PantallaMenu extends JFrame {
     }
 
     private void abrirPartida(Color colorJugador, MotorAjedrez motor, Dificultad dificultad) {
-        SesionDePartida sesion = new SesionDePartida(new PartidaAjedrez(), colorJugador,
-                perfilSeleccionado, cuentas, motor, dificultad);
-        VentanaAjedrez ventana = new VentanaAjedrez(sesion, motor, this);
+        ConfiguracionIA ia = motor != null ? new ConfiguracionIA(motor, dificultad, servicios.registroIA()) : null;
+        SesionDePartida sesion = new SesionDePartida(servicios.fabricaPartidas().get(), colorJugador,
+                perfilSeleccionado, cuentas, ia);
+        VentanaAjedrez ventana = new VentanaAjedrez(sesion, this);
         ventana.setVisible(true);
         this.setVisible(false);
     }

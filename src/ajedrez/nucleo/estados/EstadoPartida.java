@@ -3,17 +3,24 @@ package ajedrez.nucleo.estados;
 import ajedrez.nucleo.dominio.Color;
 
 /**
- * Interfaz State (Patrón de Comportamiento).
- * Modela las fases y el turno activo de la partida de ajedrez.
+ * Patrón State: las fases de la partida (turno de cada bando, jaque mate, tablas).
+ * Cada estado sabe a quién le toca jugar y cómo se transiciona al mover o al deshacer,
+ * en vez de un switch sobre una variable de estado.
  *
- * Basado directamente en el ejemplo canónico enseñado en clase:
- * En lugar de flags o if anidados, cada estado encapsula a quién le corresponde jugar
- * y cómo transiciona la partida tras un movimiento válido.
+ * El estado no sabe describirse en texto: eso lo decide cada interfaz de usuario.
  */
 public interface EstadoPartida {
+    /** Color al que le toca mover, o null si la partida terminó. */
     Color getColorTurnoActual();
+
     EstadoPartida siguienteTurno();
+
+    /** Estado al que se vuelve al deshacer la última jugada. */
     EstadoPartida turnoAnterior();
-    String getDescripcion();
+
     boolean esFinalizada();
+
+    static EstadoPartida turnoDe(Color color) {
+        return color == Color.BLANCO ? new EstadoTurnoBlanco() : new EstadoTurnoNegro();
+    }
 }

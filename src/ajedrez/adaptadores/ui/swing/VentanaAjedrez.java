@@ -6,7 +6,7 @@ import ajedrez.nucleo.dominio.Pieza;
 import ajedrez.nucleo.dominio.Posicion;
 import ajedrez.nucleo.dominio.TipoPieza;
 import ajedrez.nucleo.estados.EstadoJaqueMate;
-import ajedrez.nucleo.ia.MotorAjedrez;
+import ajedrez.nucleo.ia.DecisionIA;
 import ajedrez.nucleo.perfil.PerfilJugador;
 import ajedrez.nucleo.servicio.PartidaAjedrez;
 import ajedrez.nucleo.servicio.SelectorPromocion;
@@ -49,11 +49,11 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // -----------------------------------------------------------------------
     private final SesionDePartida sesion;
     private final PartidaAjedrez partida;
-    private final MotorAjedrez motorIA;          // null en modo 2 jugadores
     private final PantallaMenu menuOrigen;
     private final boolean tableroInvertido;      // las negras abajo si el jugador eligió negras
 
     private final VistaTablero vistaTablero;
+    private final PanelJugadas panelJugadas = new PanelJugadas(); // observador de la partida
     private Posicion casillaSeleccionada = null;
     private List<Posicion> destinosLegalesActuales = List.of();
     private Jugada ultimaJugada = null;
@@ -117,10 +117,9 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // -----------------------------------------------------------------------
     // Constructor
     // -----------------------------------------------------------------------
-    public VentanaAjedrez(SesionDePartida sesion, MotorAjedrez motorIA, PantallaMenu menuOrigen) {
+    public VentanaAjedrez(SesionDePartida sesion, PantallaMenu menuOrigen) {
         this.sesion = sesion;
         this.partida = sesion.getPartida();
-        this.motorIA = motorIA;
         this.menuOrigen = menuOrigen;
         this.tableroInvertido = sesion.getColorJugador() == Color.NEGRO;
         this.partida.setSelectorPromocion(this);
@@ -136,8 +135,8 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
             }
         });
 
-        setSize(780, 880);
-        setMinimumSize(new Dimension(560, 640));
+        setSize(1000, 880);
+        setMinimumSize(new Dimension(760, 640));
         setLocationRelativeTo(null);
         setIconImage(PantallaMenu.crearIconoAjedrez());
         setGlassPane(capaXP);
@@ -145,12 +144,17 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         setLayout(new BorderLayout());
         getContentPane().setBackground(Tema.FONDO_OSCURO);
 
-        vistaTablero = new VistaTablero(tableroInvertido);
+        Tablero tablero = partida.getTablero();
+        vistaTablero = new VistaTablero(tableroInvertido, tablero.getFilas(), tablero.getColumnas());
         vistaTablero.setAlClickear(this::onCasillaClick);
         add(construirPanelSuperior(), BorderLayout.NORTH);
         add(vistaTablero, BorderLayout.CENTER);
+        add(panelJugadas, BorderLayout.EAST);
         add(construirPanelInferior(), BorderLayout.SOUTH);
         configurarAtajosDeTeclado();
+
+        // La lista de jugadas se entera de las jugadas por el núcleo, no por esta ventana
+        partida.agregarObservador(panelJugadas);
 
         // El brillo del rey en jaque late mientras dure el jaque
         timerPulsoJaque = new Timer(40, e -> {
@@ -460,15 +464,15 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         int generacion = generacionPartida;
         actualizarVista();
 
-        new SwingWorker<Jugada, Void>() {
+        new SwingWorker<DecisionIA, Void>() {
             @Override
-            protected Jugada doInBackground() throws Exception {
+            protected DecisionIA doInBackground() throws Exception {
                 long inicio = System.currentTimeMillis();
-                Jugada jugada = sesion.calcularJugadaIA();
+                DecisionIA decision = sesion.calcularJugadaIA();
                 // Pausa mínima para que la respuesta no sea instantánea y se pueda seguir la partida
                 long espera = 450 - (System.currentTimeMillis() - inicio);
                 if (espera > 0) Thread.sleep(espera);
-                return jugada;
+                return decision;
             }
 
             @Override
@@ -476,11 +480,17 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
                 if (generacion != generacionPartida || !isDisplayable()) return; // partida reiniciada o ventana cerrada
                 iaPensando = false;
                 try {
-                    ResultadoJugada resultado = sesion.mover(get());
+                    DecisionIA decision = get();
+                    ResultadoJugada resultado = sesion.mover(decision.jugada());
                     if (resultado != null) {
                         aplicarResultado(resultado);
                     } else {
                         actualizarVista();
+                    }
+                    if (decision.usoRespaldo()) {
+                        // Transparencia: se avisa cuando la jugada no salió del motor
+                        capaXP.mostrar("Jugada de respaldo", "El motor de IA no respondió una jugada válida",
+                                centroDelTablero(), 0, 20f, Tema.TEXTO_SUAVE);
                     }
                 } catch (Exception e) {
                     actualizarVista();
@@ -501,8 +511,8 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         boolean esMate = partida.getEstadoActual() instanceof EstadoJaqueMate;
 
         VistaTablero v = vistaTablero;
-        for (int fila = 0; fila < 8; fila++) {
-            for (int col = 0; col < 8; col++) {
+        for (int fila = 0; fila < tablero.getFilas(); fila++) {
+            for (int col = 0; col < tablero.getColumnas(); col++) {
                 Posicion pos = new Posicion(fila, col);
                 Pieza pieza = tablero.obtenerPieza(pos);
 
@@ -515,7 +525,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
                     if (imgPieza != null) {
                         v.imagenPieza[fila][col] = imgPieza;
                     } else {
-                        v.simboloPieza[fila][col] = pieza.getSimboloUnicode();
+                        v.simboloPieza[fila][col] = TextosPartida.simbolo(pieza);
                         v.colorSimbolo[fila][col] = pieza.getColor() == Color.BLANCO
                                 ? java.awt.Color.WHITE : new java.awt.Color(20, 20, 20);
                     }
@@ -555,7 +565,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
 
     private String textoEstado() {
         if (partida.getEstadoActual().esFinalizada() || !sesion.esContraIA()) {
-            return partida.getEstadoActual().getDescripcion();
+            return TextosPartida.describir(partida.getEstadoActual());
         }
         if (sesion.esTurnoDeLaIA()) {
             return "La IA está pensando…";
@@ -675,7 +685,7 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
     // Fin de partida / reinicio / salir
     // -----------------------------------------------------------------------
     private void onPartidaFinalizada(boolean gane) {
-        String desc = partida.getEstadoActual().getDescripcion();
+        String desc = TextosPartida.describir(partida.getEstadoActual());
         String mensaje = gane
                 ? "¡Ganaste la partida!\n+" + PerfilJugador.PUNTOS_VICTORIA + " XP"
                 : "La partida terminó.\n" + desc;
@@ -707,7 +717,8 @@ public class VentanaAjedrez extends JFrame implements SelectorPromocion {
         generacionPartida++;
         sesion.descartarProgresoNoGuardado();
         timerPulsoJaque.stop();
-        if (motorIA != null) motorIA.cerrar();
+        partida.quitarObservador(panelJugadas); // el que se suscribe, se desuscribe
+        sesion.finalizar();
         this.dispose();
         if (menuOrigen != null) {
             menuOrigen.onPartidaTerminada(sesion.getPerfil());

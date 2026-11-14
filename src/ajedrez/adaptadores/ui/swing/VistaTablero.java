@@ -43,16 +43,18 @@ class VistaTablero extends JComponent {
     // Separación entre baldosas (fracción de la casilla) para que se vea la junta de piedra
     private static final double JUNTA = 0.015;
 
-    private static final BufferedImage FONDO_COMPUESTO;
     private static final Homografia PERSPECTIVA =
             new Homografia(ESQ_SUP_IZQ, ESQ_SUP_DER, ESQ_INF_DER, ESQ_INF_IZQ);
 
-    static {
-        BufferedImage fondo = Tema.cargarImagen("tablero_fondo.jpg");
-        FONDO_COMPUESTO = fondo != null
-                ? componerTablero(fondo, Tema.cargarImagen("baldosa_blanca.png"),
-                        Tema.cargarImagen("baldosa_azul.png"), Tema.cargarImagen("baldosa_roja.png"))
-                : null;
+    // El tablero compuesto se calcula una vez por tamaño y se comparte entre ventanas
+    private static final Map<String, BufferedImage> FONDOS_COMPUESTOS = new HashMap<>();
+
+    private static synchronized BufferedImage fondoCompuestoPara(int filas, int columnas) {
+        return FONDOS_COMPUESTOS.computeIfAbsent(filas + "x" + columnas, k -> {
+            BufferedImage fondo = Tema.cargarImagen("tablero_fondo.jpg");
+            return fondo == null ? null : componerTablero(fondo, Tema.cargarImagen("baldosa_blanca.png"),
+                    Tema.cargarImagen("baldosa_azul.png"), Tema.cargarImagen("baldosa_roja.png"), filas, columnas);
+        });
     }
 
     private static final java.awt.Color COLOR_SELECCION = new java.awt.Color(250, 230, 60, 120);
@@ -68,12 +70,12 @@ class VistaTablero extends JComponent {
     // Estado que la ventana actualiza (indexado por posición lógica [fila][columna]).
     // Después de cambiarlo hay que llamar a invalidar().
     // -----------------------------------------------------------------------
-    final BufferedImage[][] imagenPieza = new BufferedImage[8][8];
-    final String[][] simboloPieza = new String[8][8];            // si falta la imagen
-    final java.awt.Color[][] colorSimbolo = new java.awt.Color[8][8];
-    final boolean[][] destino = new boolean[8][8];
-    final boolean[][] captura = new boolean[8][8];
-    final boolean[][] ultimaJugada = new boolean[8][8];
+    final BufferedImage[][] imagenPieza;
+    final String[][] simboloPieza;            // si falta la imagen
+    final java.awt.Color[][] colorSimbolo;
+    final boolean[][] destino;
+    final boolean[][] captura;
+    final boolean[][] ultimaJugada;
     Posicion seleccionada;
     Posicion reyEnJaque;
     boolean esMate;
@@ -83,6 +85,9 @@ class VistaTablero extends JComponent {
     int desplazamientoX = 0;
 
     private final boolean invertido;
+    private final int filas;
+    private final int columnas;
+    private final BufferedImage fondoCompuesto;
     private Posicion hover;
     private Consumer<Posicion> alClickear = p -> {};
 
@@ -100,7 +105,20 @@ class VistaTablero extends JComponent {
     private final Map<String, BufferedImage> piezasEscaladas = new HashMap<>();
 
     VistaTablero(boolean invertido) {
+        this(invertido, 8, 8);
+    }
+
+    VistaTablero(boolean invertido, int filas, int columnas) {
         this.invertido = invertido;
+        this.filas = filas;
+        this.columnas = columnas;
+        this.fondoCompuesto = fondoCompuestoPara(filas, columnas);
+        this.imagenPieza = new BufferedImage[filas][columnas];
+        this.simboloPieza = new String[filas][columnas];
+        this.colorSimbolo = new java.awt.Color[filas][columnas];
+        this.destino = new boolean[filas][columnas];
+        this.captura = new boolean[filas][columnas];
+        this.ultimaJugada = new boolean[filas][columnas];
         setOpaque(true);
         MouseAdapter mouse = new MouseAdapter() {
             @Override public void mouseMoved(MouseEvent e) { actualizarHover(casillaEn(e.getPoint())); }
@@ -136,8 +154,8 @@ class VistaTablero extends JComponent {
 
     /** Repinta las casillas marcadas como destino (animación de aparición de las marcas). */
     void repintarDestinos() {
-        for (int f = 0; f < 8; f++)
-            for (int c = 0; c < 8; c++)
+        for (int f = 0; f < filas; f++)
+            for (int c = 0; c < columnas; c++)
                 if (destino[f][c]) repintarCasilla(new Posicion(f, c));
     }
 
@@ -153,8 +171,8 @@ class VistaTablero extends JComponent {
     // -----------------------------------------------------------------------
     // Geometría: posición lógica ↔ casilla en pantalla
     // -----------------------------------------------------------------------
-    private int filaVisual(Posicion p) { return invertido ? 7 - p.getFila() : p.getFila(); }
-    private int colVisual(Posicion p)  { return invertido ? 7 - p.getColumna() : p.getColumna(); }
+    private int filaVisual(Posicion p) { return invertido ? filas - 1 - p.getFila() : p.getFila(); }
+    private int colVisual(Posicion p)  { return invertido ? columnas - 1 - p.getColumna() : p.getColumna(); }
 
     private void recalcularEscala() {
         Dimension d = getSize();
@@ -168,9 +186,9 @@ class VistaTablero extends JComponent {
         capasSucias = true;
     }
 
-    /** Punto de pantalla (sin la sacudida) para la coordenada del tablero (columna, fila) entre 0 y 8. */
+    /** Punto de pantalla (sin la sacudida) para la coordenada del tablero (columna, fila) en unidades de casilla. */
     private Point2D.Double aPantalla(double colU, double filaV) {
-        Point2D.Double p = PERSPECTIVA.aplicar(colU / 8.0, filaV / 8.0);
+        Point2D.Double p = PERSPECTIVA.aplicar(colU / columnas, filaV / filas);
         return new Point2D.Double(origenX + p.x * escala, origenY + p.y * escala);
     }
 
@@ -195,7 +213,7 @@ class VistaTablero extends JComponent {
 
     Point centroDelTablero() {
         recalcularEscala();
-        Point2D.Double c = aPantalla(4, 4);
+        Point2D.Double c = aPantalla(columnas / 2.0, filas / 2.0);
         return new Point((int) Math.round(c.x), (int) Math.round(c.y));
     }
 
@@ -205,8 +223,8 @@ class VistaTablero extends JComponent {
         double y = (punto.y - origenY) / escala;
         Point2D.Double uv = PERSPECTIVA.invertir(x, y);
         if (uv.x < 0 || uv.x >= 1 || uv.y < 0 || uv.y >= 1) return null;
-        int colV = (int) (uv.x * 8), filaV = (int) (uv.y * 8);
-        return new Posicion(invertido ? 7 - filaV : filaV, invertido ? 7 - colV : colV);
+        int colV = (int) (uv.x * columnas), filaV = (int) (uv.y * filas);
+        return new Posicion(invertido ? filas - 1 - filaV : filaV, invertido ? columnas - 1 - colV : colV);
     }
 
     // -----------------------------------------------------------------------
@@ -239,8 +257,8 @@ class VistaTablero extends JComponent {
     /** Lo que cambia cuadro a cuadro: brillo del jaque, mouse sobre un destino y marcas. */
     private void dibujarAnimados(Graphics2D g2) {
         if (reyEnJaque != null) dibujarBrilloJaque(g2, reyEnJaque);
-        for (int f = 0; f < 8; f++) {
-            for (int c = 0; c < 8; c++) {
+        for (int f = 0; f < filas; f++) {
+            for (int c = 0; c < columnas; c++) {
                 if (!destino[f][c]) continue;
                 Posicion pos = new Posicion(f, c);
                 Shape forma = formaCasilla(pos);
@@ -298,10 +316,10 @@ class VistaTablero extends JComponent {
         int wReal = (int) Math.ceil(w * escalaPantalla), hReal = (int) Math.ceil(h * escalaPantalla);
         escalaPantallaCapas = escalaPantalla;
 
-        if (fondoEscalado == null && FONDO_COMPUESTO != null) {
-            int fw = Math.max(1, (int) Math.round(FONDO_COMPUESTO.getWidth() * escala * escalaPantalla));
-            int fh = Math.max(1, (int) Math.round(FONDO_COMPUESTO.getHeight() * escala * escalaPantalla));
-            fondoEscalado = Tema.escalarConCalidad(FONDO_COMPUESTO, fw, fh, false);
+        if (fondoEscalado == null && fondoCompuesto != null) {
+            int fw = Math.max(1, (int) Math.round(fondoCompuesto.getWidth() * escala * escalaPantalla));
+            int fh = Math.max(1, (int) Math.round(fondoCompuesto.getHeight() * escala * escalaPantalla));
+            fondoEscalado = Tema.escalarConCalidad(fondoCompuesto, fw, fh, false);
         }
 
         // Capa 1: fondo + tablero + resaltados que no se animan + coordenadas
@@ -316,8 +334,8 @@ class VistaTablero extends JComponent {
             g.drawImage(fondoEscalado, (int) Math.round(origenX * escalaPantalla), (int) Math.round(origenY * escalaPantalla), null);
             g.setTransform(t);
         }
-        for (int f = 0; f < 8; f++) {
-            for (int c = 0; c < 8; c++) {
+        for (int f = 0; f < filas; f++) {
+            for (int c = 0; c < columnas; c++) {
                 Posicion pos = new Posicion(f, c);
                 Shape forma = formaCasilla(pos);
                 if (ultimaJugada[f][c]) {
@@ -342,9 +360,9 @@ class VistaTablero extends JComponent {
         g.setComposite(AlphaComposite.Clear);
         g.fillRect(0, 0, w, h);
         g.setComposite(AlphaComposite.SrcOver);
-        for (int filaV = 0; filaV < 8; filaV++) {
-            for (int colV = 0; colV < 8; colV++) {
-                int f = invertido ? 7 - filaV : filaV, c = invertido ? 7 - colV : colV;
+        for (int filaV = 0; filaV < filas; filaV++) {
+            for (int colV = 0; colV < columnas; colV++) {
+                int f = invertido ? filas - 1 - filaV : filaV, c = invertido ? columnas - 1 - colV : colV;
                 dibujarPieza(g, new Posicion(f, c), escalaPantalla);
             }
         }
@@ -370,14 +388,16 @@ class VistaTablero extends JComponent {
         float tam = (float) Math.max(10, 15 * escala);
         g2.setFont(new Font("Segoe UI", Font.BOLD, 1).deriveFont(tam));
         FontMetrics fm = g2.getFontMetrics();
-        for (int i = 0; i < 8; i++) {
-            int fila = invertido ? 7 - i : i;
+        for (int i = 0; i < filas; i++) {
+            int fila = invertido ? filas - 1 - i : i;
             Point2D.Double p = aPantalla(0.08, i + 0.06);
-            dibujarTextoCoordenada(g2, String.valueOf(8 - fila), p.x, p.y + fm.getAscent(), i % 2 == 0);
-            int col = invertido ? 7 - i : i;
-            Point2D.Double q = aPantalla(i + 0.92, 7.94);
+            dibujarTextoCoordenada(g2, String.valueOf(filas - fila), p.x, p.y + fm.getAscent(), i % 2 == 0);
+        }
+        for (int i = 0; i < columnas; i++) {
+            int col = invertido ? columnas - 1 - i : i;
+            Point2D.Double q = aPantalla(i + 0.92, filas - 0.06);
             String letra = String.valueOf((char) ('a' + col));
-            dibujarTextoCoordenada(g2, letra, q.x - fm.stringWidth(letra), q.y - fm.getDescent(), (7 + i) % 2 == 0);
+            dibujarTextoCoordenada(g2, letra, q.x - fm.stringWidth(letra), q.y - fm.getDescent(), (filas - 1 + i) % 2 == 0);
         }
     }
 
@@ -423,7 +443,7 @@ class VistaTablero extends JComponent {
     // Composición del tablero (una sola vez, al cargar la clase)
     // -----------------------------------------------------------------------
     private static BufferedImage componerTablero(BufferedImage fondo, BufferedImage blanca,
-                                                 BufferedImage azul, BufferedImage roja) {
+                                                 BufferedImage azul, BufferedImage roja, int filas, int columnas) {
         BufferedImage salida = new BufferedImage(fondo.getWidth(), fondo.getHeight(), BufferedImage.TYPE_INT_RGB);
         Graphics2D g = salida.createGraphics();
         g.drawImage(fondo, 0, 0, null);
@@ -439,14 +459,14 @@ class VistaTablero extends JComponent {
             for (int x = minX; x <= maxX; x++) {
                 Point2D.Double uv = PERSPECTIVA.invertir(x + 0.5, y + 0.5);
                 if (uv.x < 0 || uv.x >= 1 || uv.y < 0 || uv.y >= 1) continue;
-                double cu = uv.x * 8, cv = uv.y * 8;
+                double cu = uv.x * columnas, cv = uv.y * filas;
                 int col = (int) cu, fila = (int) cv;
                 double lu = (cu - col - JUNTA) / (1 - 2 * JUNTA);
                 double lv = (cv - fila - JUNTA) / (1 - 2 * JUNTA);
                 if (lu < 0 || lu >= 1 || lv < 0 || lv >= 1) continue;
 
-                // Casilla clara si (fila + columna) es par (a8 y h1 son claras)
-                BufferedImage baldosa = (fila + col) % 2 == 0 ? blanca : (fila >= 4 ? azul : roja);
+                // Casilla clara si (fila + columna) es par; oscuras azules en la mitad de abajo, rojas arriba
+                BufferedImage baldosa = (fila + col) % 2 == 0 ? blanca : (fila >= filas / 2 ? azul : roja);
                 int pixel = muestrear(baldosa, lu * baldosa.getWidth(), lv * baldosa.getHeight());
                 salida.setRGB(x, y, mezclarSobre(pixel, salida.getRGB(x, y)));
             }

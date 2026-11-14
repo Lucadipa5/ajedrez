@@ -1,0 +1,10 @@
+# Compilado
+bin/
+*.class
+fuentes.txt
+
+# Datos locales de la aplicación (cuentas de los usuarios de cada máquina)
+perfiles.dat
+
+# Python
+__pycache__/

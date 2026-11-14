@@ -2,97 +2,57 @@ package ajedrez.nucleo.fabrica;
 
 import ajedrez.nucleo.dominio.Color;
 import ajedrez.nucleo.dominio.Pieza;
-import ajedrez.nucleo.dominio.Posicion;
 import ajedrez.nucleo.dominio.TipoPieza;
 import ajedrez.nucleo.estrategias.*;
-import ajedrez.nucleo.tablero.Tablero;
+
+import java.util.EnumMap;
+import java.util.Map;
+import java.util.function.Supplier;
 
 /**
- * Patrón Factory (Creacional): Centraliza la instanciación de piezas y el ensamblado
- * de sus estrategias de movimiento correspondientes.
+ * Patrón Factory: centraliza la creación de piezas y el ensamblado de su estrategia de movimiento.
  *
- * Muestra el principio Open/Closed y Composición:
- * La Reina no requiere una clase 'Reina' acoplada con código duplicado; simplemente se
- * compone de las estrategias ortogonal y diagonal existentes.
+ * Open/Closed: en vez de un switch por tipo (que habría que reabrir con cada pieza nueva),
+ * mantiene un registro tipo → estrategia. Agregar o cambiar una pieza es registrar una
+ * estrategia nueva; ninguna clase existente se modifica.
+ *
+ * Composición sobre herencia: la Reina no es una subclase con código copiado, es la
+ * composición de las estrategias ortogonal y diagonal. El Rey compone su paso simple con el enroque.
  */
 public class FabricaPiezas {
 
-    public Pieza crearPeon(Color color) {
-        return new Pieza(TipoPieza.PEON, color, new MovimientoPeon());
-    }
+    private final Map<TipoPieza, Supplier<EstrategiaMovimiento>> estrategias = new EnumMap<>(TipoPieza.class);
 
-    public Pieza crearTorre(Color color) {
-        return new Pieza(TipoPieza.TORRE, color, new MovimientoOrtogonal());
-    }
-
-    public Pieza crearCaballo(Color color) {
-        return new Pieza(TipoPieza.CABALLO, color, new MovimientoCaballo());
-    }
-
-    public Pieza crearAlfil(Color color) {
-        return new Pieza(TipoPieza.ALFIL, color, new MovimientoDiagonal());
-    }
-
-    public Pieza crearReina(Color color) {
-        // Demostración explícita de Composición sobre Herencia
-        return new Pieza(
-                TipoPieza.REINA,
-                color,
-                new MovimientoCompuesto(new MovimientoOrtogonal(), new MovimientoDiagonal())
-        );
-    }
-
-    public Pieza crearRey(Color color) {
-        return new Pieza(TipoPieza.REY, color, new MovimientoRey());
-    }
-
-    public Pieza crearPieza(TipoPieza tipo, Color color) {
-        switch (tipo) {
-            case TORRE: return crearTorre(color);
-            case CABALLO: return crearCaballo(color);
-            case ALFIL: return crearAlfil(color);
-            case REINA: return crearReina(color);
-            case REY: return crearRey(color);
-            case PEON:
-            default:
-                return crearPeon(color);
-        }
+    /** Fábrica con las 6 piezas del ajedrez estándar. */
+    public FabricaPiezas() {
+        registrar(TipoPieza.PEON, MovimientoPeon::new);
+        registrar(TipoPieza.TORRE, MovimientoOrtogonal::new);
+        registrar(TipoPieza.CABALLO, MovimientoCaballo::new);
+        registrar(TipoPieza.ALFIL, MovimientoDiagonal::new);
+        registrar(TipoPieza.REINA, () -> new MovimientoCompuesto(new MovimientoOrtogonal(), new MovimientoDiagonal()));
+        registrar(TipoPieza.REY, () -> new MovimientoCompuesto(new MovimientoRey(), new MovimientoEnroque()));
     }
 
     /**
-     * Llena el tablero con la disposición oficial de 32 piezas de una partida de ajedrez.
+     * Registra (o reemplaza) cómo se mueve un tipo de pieza. Punto de extensión para variantes.
      */
-    public void poblarTableroInicial(Tablero tablero) {
-        tablero.limpiar();
-
-        // Piezas Mayores Negras (Fila 0)
-        tablero.colocarPieza(crearTorre(Color.NEGRO), new Posicion(0, 0));
-        tablero.colocarPieza(crearCaballo(Color.NEGRO), new Posicion(0, 1));
-        tablero.colocarPieza(crearAlfil(Color.NEGRO), new Posicion(0, 2));
-        tablero.colocarPieza(crearReina(Color.NEGRO), new Posicion(0, 3));
-        tablero.colocarPieza(crearRey(Color.NEGRO), new Posicion(0, 4));
-        tablero.colocarPieza(crearAlfil(Color.NEGRO), new Posicion(0, 5));
-        tablero.colocarPieza(crearCaballo(Color.NEGRO), new Posicion(0, 6));
-        tablero.colocarPieza(crearTorre(Color.NEGRO), new Posicion(0, 7));
-
-        // Peones Negros (Fila 1)
-        for (int c = 0; c < 8; c++) {
-            tablero.colocarPieza(crearPeon(Color.NEGRO), new Posicion(1, c));
-        }
-
-        // Peones Blancos (Fila 6)
-        for (int c = 0; c < 8; c++) {
-            tablero.colocarPieza(crearPeon(Color.BLANCO), new Posicion(6, c));
-        }
-
-        // Piezas Mayores Blancas (Fila 7)
-        tablero.colocarPieza(crearTorre(Color.BLANCO), new Posicion(7, 0));
-        tablero.colocarPieza(crearCaballo(Color.BLANCO), new Posicion(7, 1));
-        tablero.colocarPieza(crearAlfil(Color.BLANCO), new Posicion(7, 2));
-        tablero.colocarPieza(crearReina(Color.BLANCO), new Posicion(7, 3));
-        tablero.colocarPieza(crearRey(Color.BLANCO), new Posicion(7, 4));
-        tablero.colocarPieza(crearAlfil(Color.BLANCO), new Posicion(7, 5));
-        tablero.colocarPieza(crearCaballo(Color.BLANCO), new Posicion(7, 6));
-        tablero.colocarPieza(crearTorre(Color.BLANCO), new Posicion(7, 7));
+    public void registrar(TipoPieza tipo, Supplier<EstrategiaMovimiento> estrategia) {
+        estrategias.put(tipo, estrategia);
     }
+
+    public Pieza crearPieza(TipoPieza tipo, Color color) {
+        Supplier<EstrategiaMovimiento> estrategia = estrategias.get(tipo);
+        if (estrategia == null) {
+            throw new IllegalArgumentException("No hay estrategia de movimiento registrada para " + tipo);
+        }
+        return new Pieza(tipo, color, estrategia.get());
+    }
+
+    // Atajos de lectura para los tipos estándar
+    public Pieza crearPeon(Color color)    { return crearPieza(TipoPieza.PEON, color); }
+    public Pieza crearTorre(Color color)   { return crearPieza(TipoPieza.TORRE, color); }
+    public Pieza crearCaballo(Color color) { return crearPieza(TipoPieza.CABALLO, color); }
+    public Pieza crearAlfil(Color color)   { return crearPieza(TipoPieza.ALFIL, color); }
+    public Pieza crearReina(Color color)   { return crearPieza(TipoPieza.REINA, color); }
+    public Pieza crearRey(Color color)     { return crearPieza(TipoPieza.REY, color); }
 }

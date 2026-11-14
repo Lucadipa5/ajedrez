@@ -9,6 +9,7 @@ import java.util.List;
 
 /**
  * Estrategia de movimiento del Rey: una casilla en cualquier dirección adyacente.
+ * El enroque es otra estrategia ({@link MovimientoEnroque}) que la fábrica compone con esta.
  */
 public class MovimientoRey implements EstrategiaMovimiento {
     private static final int[][] PASOS = {
@@ -25,15 +26,10 @@ public class MovimientoRey implements EstrategiaMovimiento {
 
         for (int[] paso : PASOS) {
             Posicion destino = origen.desplazar(paso[0], paso[1]);
-            if (destino.esValida()) {
-                if (!tablero.estaOcupada(destino)) {
-                    destinos.add(destino);
-                } else {
-                    Pieza piezaEnDestino = tablero.obtenerPieza(destino);
-                    if (piezaEnDestino.getColor() != piezaOrigen.getColor()) {
-                        destinos.add(destino);
-                    }
-                }
+            if (!tablero.esCasillaValida(destino)) continue;
+            Pieza piezaEnDestino = tablero.obtenerPieza(destino);
+            if (piezaEnDestino == null || !piezaEnDestino.esDelMismoBando(piezaOrigen)) {
+                destinos.add(destino);
             }
         }
         return destinos;

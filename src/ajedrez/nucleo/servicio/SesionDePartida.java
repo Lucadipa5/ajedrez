@@ -1,13 +1,15 @@
 package ajedrez.nucleo.servicio;
 
 import ajedrez.nucleo.dominio.Color;
+import ajedrez.nucleo.dominio.EventoJugada;
 import ajedrez.nucleo.dominio.Jugada;
 import ajedrez.nucleo.dominio.Pieza;
-import ajedrez.nucleo.dominio.Posicion;
 import ajedrez.nucleo.dominio.TipoPieza;
 import ajedrez.nucleo.estados.EstadoJaqueMate;
+import ajedrez.nucleo.estrategias.MovimientoPeon;
+import ajedrez.nucleo.ia.ConfiguracionIA;
+import ajedrez.nucleo.ia.DecisionIA;
 import ajedrez.nucleo.ia.Dificultad;
-import ajedrez.nucleo.ia.MotorAjedrez;
 import ajedrez.nucleo.ia.MotorNoDisponibleException;
 import ajedrez.nucleo.perfil.PerfilJugador;
 import ajedrez.nucleo.perfil.ServicioCuentas;
@@ -16,7 +18,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
 
 /**
@@ -28,6 +29,11 @@ import java.util.Random;
  * - Comer una pieza rival, dar jaque y ganar la partida suman puntos.
  * - Al deshacer se vuelve al perfil de antes de la jugada, así la XP no se puede ganar dos veces.
  * - El progreso se guarda solo cuando la partida termina.
+ *
+ * Reglas de IA (la IA asesora, no arbitra):
+ * - Toda sugerencia del motor se valida contra las jugadas legales del núcleo.
+ * - Si el motor falla, no responde o propone algo ilegal, se juega una jugada legal de respaldo
+ *   y la partida continúa. Cada decisión queda registrada.
  */
 public class SesionDePartida {
 
@@ -38,14 +44,17 @@ public class SesionDePartida {
     public record EventoXP(MotivoXP motivo, int puntos, boolean subioNivel, int nivel) {}
 
     /** Resultado de una jugada válida. */
-    public record ResultadoJugada(Jugada jugada, List<EventoXP> eventosXP, boolean partidaTerminada, boolean ganoJugador) {}
+    public record ResultadoJugada(EventoJugada evento, List<EventoXP> eventosXP, boolean partidaTerminada, boolean ganoJugador) {
+        public Jugada jugada() {
+            return evento.jugada();
+        }
+    }
 
     private final PartidaAjedrez partida;
     private final Color colorJugador;
     private final ServicioCuentas cuentas;     // null si se juega sin cuenta
     private PerfilJugador perfil;              // null si se juega sin cuenta
-    private final MotorAjedrez motorIA;        // null en modo 2 jugadores
-    private final Dificultad dificultad;
+    private final ConfiguracionIA ia;          // null en modo 2 jugadores
 
     // Copias del perfil alineadas con el historial de jugadas
     private final Deque<PerfilJugador> perfilesAntesDeJugada = new ArrayDeque<>();
@@ -53,13 +62,12 @@ public class SesionDePartida {
     private final Random azar = new Random();
 
     public SesionDePartida(PartidaAjedrez partida, Color colorJugador, PerfilJugador perfil,
-                           ServicioCuentas cuentas, MotorAjedrez motorIA, Dificultad dificultad) {
+                           ServicioCuentas cuentas, ConfiguracionIA ia) {
         this.partida = partida;
         this.colorJugador = colorJugador;
         this.perfil = perfil;
         this.cuentas = cuentas;
-        this.motorIA = motorIA;
-        this.dificultad = dificultad;
+        this.ia = ia;
     }
 
     // -----------------------------------------------------------------------
@@ -70,11 +78,10 @@ public class SesionDePartida {
      * Intenta hacer la jugada. Devuelve null si no es legal.
      */
     public ResultadoJugada mover(Jugada jugada) {
-        Color mueve = partida.getEstadoActual().getColorTurnoActual();
-        Pieza piezaEnDestino = partida.getTablero().obtenerPieza(jugada.getDestino());
         PerfilJugador perfilAntes = perfil != null ? perfil.copiar() : null;
 
-        if (!partida.intentarMover(jugada.getOrigen(), jugada.getDestino(), jugada.getPromocion())) {
+        EventoJugada evento = partida.intentarMover(jugada);
+        if (evento == null) {
             return null;
         }
         if (perfilAntes != null) {
@@ -83,18 +90,18 @@ public class SesionDePartida {
         }
 
         List<EventoXP> eventos = new ArrayList<>();
-        if (perfil != null && mueve == colorJugador) {
-            if (piezaEnDestino != null && piezaEnDestino.getColor() == colorJugador.opuesto()) {
+        if (perfil != null && evento.colorQueMovio() == colorJugador) {
+            if (evento.esCaptura()) {
                 boolean subio = perfil.registrarPiezaComida();
                 eventos.add(new EventoXP(MotivoXP.CAPTURA, PerfilJugador.PUNTOS_COMER_PIEZA, subio, perfil.getNivel()));
             }
-            if (partida.estaEnJaqueTurnoActual()) {
+            if (evento.jaqueAlRival()) {
                 boolean subio = perfil.registrarJaque();
                 eventos.add(new EventoXP(MotivoXP.JAQUE, PerfilJugador.PUNTOS_JAQUE, subio, perfil.getNivel()));
             }
         }
 
-        boolean terminada = partida.getEstadoActual().esFinalizada();
+        boolean terminada = evento.finDePartida();
         boolean gano = terminada && partida.getEstadoActual() instanceof EstadoJaqueMate mate
                 && mate.getGanador() == colorJugador;
         if (terminada && perfil != null) {
@@ -107,7 +114,7 @@ public class SesionDePartida {
             }
             cuentas.guardar(perfil);
         }
-        return new ResultadoJugada(jugada, eventos, terminada, gano);
+        return new ResultadoJugada(evento, eventos, terminada, gano);
     }
 
     /** Con la partida terminada no se puede deshacer (evita repetir la XP de la victoria). */
@@ -171,58 +178,74 @@ public class SesionDePartida {
         }
     }
 
+    /** Libera los recursos de la sesión (el motor de IA, si lo hay). */
+    public void finalizar() {
+        if (ia != null) ia.motor().cerrar();
+    }
+
     // -----------------------------------------------------------------------
     // IA
     // -----------------------------------------------------------------------
 
     public boolean esContraIA() {
-        return motorIA != null;
+        return ia != null;
     }
 
     public boolean esTurnoDeLaIA() {
-        return motorIA != null && !partida.getEstadoActual().esFinalizada()
+        return ia != null && !partida.getEstadoActual().esFinalizada()
                 && partida.getEstadoActual().getColorTurnoActual() == colorJugador.opuesto();
     }
 
     /**
      * Le pide la jugada al motor de IA. Es lento: conviene llamarlo fuera del hilo de la interfaz.
-     * Si el motor propone algo que las reglas no aceptan, se elige una jugada legal al azar.
+     * La sugerencia se valida contra las jugadas legales; si el motor falla o propone algo que las
+     * reglas no aceptan, se elige una jugada legal al azar y la partida sigue.
+     * @throws MotorNoDisponibleException solo si no hay ninguna jugada legal (no debería ocurrir)
      */
-    public Jugada calcularJugadaIA() throws MotorNoDisponibleException {
+    public DecisionIA calcularJugadaIA() throws MotorNoDisponibleException {
         Color turno = partida.getEstadoActual().getColorTurnoActual();
-        Jugada propuesta = motorIA.elegirJugada(partida.getTablero().clonar(), turno, dificultad);
-        List<Jugada> legales = jugadasLegales(turno);
+        List<Jugada> legales = partida.obtenerJugadasLegales(turno);
         if (legales.isEmpty()) {
             throw new MotorNoDisponibleException("No hay jugadas legales");
         }
-        if (propuesta != null) {
-            for (Jugada legal : legales) {
-                if (legal.getOrigen().equals(propuesta.getOrigen()) && legal.getDestino().equals(propuesta.getDestino())) {
-                    return conPromocionPorDefecto(propuesta);
+        String posicion = partida.getTablero().claveDePosicion(turno);
+
+        Jugada sugerida = null;
+        Jugada jugada = null;
+        String resultado;
+        try {
+            sugerida = ia.motor().elegirJugada(partida.getTablero().clonar(), turno, ia.dificultad());
+            if (sugerida == null) {
+                resultado = "respaldo:sin-sugerencia";
+            } else {
+                Jugada propuesta = sugerida;
+                boolean legal = legales.stream().anyMatch(l -> l.mismoRecorrido(propuesta));
+                if (legal) {
+                    jugada = conPromocionPorDefecto(sugerida);
+                    resultado = DecisionIA.ACEPTADA;
+                } else {
+                    resultado = "respaldo:jugada-ilegal";
                 }
             }
+        } catch (MotorNoDisponibleException e) {
+            resultado = "respaldo:error (" + e.getMessage() + ")";
         }
-        return conPromocionPorDefecto(legales.get(azar.nextInt(legales.size())));
-    }
+        if (jugada == null) {
+            jugada = conPromocionPorDefecto(legales.get(azar.nextInt(legales.size())));
+        }
 
-    private List<Jugada> jugadasLegales(Color turno) {
-        List<Jugada> jugadas = new ArrayList<>();
-        for (Map.Entry<Posicion, Pieza> e : partida.getTablero().getCasillasOcupadas().entrySet()) {
-            if (e.getValue().getColor() != turno) continue;
-            for (Posicion destino : partida.obtenerMovimientosLegalesPara(e.getKey())) {
-                jugadas.add(new Jugada(e.getKey(), destino, null));
-            }
-        }
-        return jugadas;
+        DecisionIA decision = new DecisionIA(posicion, ia.motor().getNombre(), sugerida, jugada, resultado);
+        ia.registro().registrar(decision);
+        return decision;
     }
 
     /** La IA nunca debe abrir el diálogo de coronación: si no eligió pieza, corona Reina. */
     private Jugada conPromocionPorDefecto(Jugada jugada) {
         Pieza pieza = partida.getTablero().obtenerPieza(jugada.getOrigen());
-        int filaFinal = jugada.getDestino().getFila();
-        boolean corona = pieza != null && pieza.getTipo() == TipoPieza.PEON && (filaFinal == 0 || filaFinal == 7);
+        boolean corona = pieza != null && pieza.getTipo() == TipoPieza.PEON
+                && MovimientoPeon.esFilaDeCoronacion(partida.getTablero(), pieza.getColor(), jugada.getDestino().getFila());
         if (corona && jugada.getPromocion() == null) {
-            return new Jugada(jugada.getOrigen(), jugada.getDestino(), TipoPieza.REINA);
+            return jugada.conPromocion(TipoPieza.REINA);
         }
         return jugada;
     }
@@ -233,5 +256,5 @@ public class SesionDePartida {
     public PartidaAjedrez getPartida() { return partida; }
     public PerfilJugador getPerfil() { return perfil; }
     public Color getColorJugador() { return colorJugador; }
-    public Dificultad getDificultad() { return dificultad; }
+    public Dificultad getDificultad() { return ia != null ? ia.dificultad() : null; }
 }

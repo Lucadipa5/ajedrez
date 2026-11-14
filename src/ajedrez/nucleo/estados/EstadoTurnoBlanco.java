@@ -23,11 +23,6 @@ public class EstadoTurnoBlanco implements EstadoPartida {
     }
 
     @Override
-    public String getDescripcion() {
-        return "Turno de las Blancas";
-    }
-
-    @Override
     public boolean esFinalizada() {
         return false;
     }

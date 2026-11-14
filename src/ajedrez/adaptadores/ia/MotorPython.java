@@ -86,6 +86,11 @@ public class MotorPython implements MotorAjedrez {
     }
 
     @Override
+    public String getNombre() {
+        return "python-chess";
+    }
+
+    @Override
     public boolean estaDisponible() {
         return proceso != null && proceso.isAlive();
     }
@@ -102,8 +107,14 @@ public class MotorPython implements MotorAjedrez {
         if (!estaDisponible()) {
             throw new MotorNoDisponibleException(motivoNoDisponible());
         }
+        String fen;
         try {
-            entrada.write(dificultad.name() + " " + NotacionFEN.desdeTablero(tablero, turno));
+            fen = NotacionFEN.desdeTablero(tablero, turno);
+        } catch (IllegalArgumentException e) {
+            throw new MotorNoDisponibleException("La IA solo sabe jugar en el tablero estándar de 8x8", e);
+        }
+        try {
+            entrada.write(dificultad.name() + " " + fen);
             entrada.newLine();
             entrada.flush();
         } catch (IOException e) {

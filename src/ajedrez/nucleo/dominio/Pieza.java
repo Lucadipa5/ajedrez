@@ -8,9 +8,10 @@ import java.util.Objects;
 
 /**
  * Entidad del núcleo que representa una pieza de ajedrez.
- * Aplica el principio de Composición sobre Herencia: en lugar de forzar una jerarquía
- * rígida con herencia de comportamientos, la pieza POSEE una estrategia de movimiento
- * inyectada en su constructor (has-a / Strategy Pattern).
+ *
+ * Composición sobre herencia: no hay una jerarquía Pieza → Torre → ... con comportamiento heredado.
+ * La pieza TIENE una estrategia de movimiento (patrón Strategy) que recibe por constructor;
+ * la Reina, por ejemplo, se arma combinando las estrategias de la Torre y el Alfil.
  */
 public class Pieza {
     private final TipoPieza tipo;
@@ -33,6 +34,7 @@ public class Pieza {
         return color;
     }
 
+    /** Si ya se movió alguna vez en la partida (lo usan el enroque y el avance doble del peón). */
     public boolean seHaMovido() {
         return seHaMovido;
     }
@@ -42,7 +44,7 @@ public class Pieza {
     }
 
     /**
-     * Delega el cálculo de posibles destinos a su estrategia de movimiento inyectada.
+     * Delega el cálculo de posibles destinos a su estrategia de movimiento.
      */
     public List<Posicion> calcularMovimientos(Posicion origen, Tablero tablero) {
         return estrategiaMovimiento.calcularPosiblesDestinos(origen, tablero);
@@ -52,8 +54,8 @@ public class Pieza {
         return estrategiaMovimiento;
     }
 
-    public String getSimboloUnicode() {
-        return tipo.getSimboloUnicode(color);
+    public boolean esDelMismoBando(Pieza otra) {
+        return otra != null && otra.color == this.color;
     }
 
     @Override

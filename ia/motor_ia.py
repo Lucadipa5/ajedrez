@@ -6,6 +6,9 @@ y una búsqueda alfa-beta con evaluación por material y posición para elegir l
 Si hay un Stockfish instalado (variable de entorno STOCKFISH_PATH o "stockfish" en el PATH),
 en dificultad Difícil se usa ese motor.
 
+El FEN que manda el juego incluye derechos de enroque y casilla al paso, así que el motor
+puede proponer enroques y capturas al paso: el núcleo en Java las valida y las aplica.
+
 Protocolo (una línea por mensaje, por stdin/stdout):
   - Al iniciar imprime "LISTO", o "ERROR <motivo>" si falta la librería.
   - Recibe:   "<dificultad> <fen>"    (dificultad: FACIL | MEDIA | DIFICIL)
